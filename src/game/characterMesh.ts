@@ -103,8 +103,10 @@ export const ASSET_LIMB = {
   /** softness of the ankle -> paw transition (bigger = smoother boot) */
   footBlend: 0.085,
   /** how wide the hanging arms sit in the idle pose (asset arms hang close) */
-  armSpread: 0.12,
+  armSpread: 0.22,
 };
+/** baked cavity shading of the asset look: min + range * ao (raw sRGB space) */
+export const ASSET_SHADE = { min: 0.5, range: 0.5 };
 const ARM_BOW = () => ASSET_LIMB.bow;
 const FOOT_FWD = () => ASSET_LIMB.footFwd;
 /** leg-local y stretched by the leg length tuning (hip pivot fixed) */
@@ -451,7 +453,10 @@ class Cat {
         // across) that widens slightly towards the wrist, ending in a round
         // mitten that is clearly wider than the wrist.
         const kA = (0.7 * ar + 0.3 * at) * ASSET_LIMB.armR;
-        const bow = ARM_BOW();
+        // The bind frames of both arms share the same +x direction, so the
+        // outward bow has to be mirrored by hand or one arm bows into the body
+        // while the other swings away from it.
+        const bow = ARM_BOW() * (a === "armL" ? 1 : -1);
         const rTop = 0.066 * kA;
         const rWrist = 0.0675 * kA;
         const upper = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [bow * 0.55, AY(-0.075), 0.004]),
@@ -622,6 +627,103 @@ class Cat {
       this.paint(slab(c, [d.x, d.y, d.z], 0.032, 0.17), col, 0.01);
     }
   }
+  /**
+   * Markings matched to the exported 3D cat (asset shape only).
+   * Three forehead stripes, long cheek dashes, a tall white chest/belly, white
+   * mittens and socks, two rings per limb and a striped tail.
+   */
+  tabbyAsset(stripe: number, white: number) {
+    const soft = 0.004;
+    // Every number below is the exported 3D cat's own marking coordinate. The
+    // asset is authored in head/torso-local units that match ours 1:1, so the
+    // pattern lands where the model has it instead of being eyeballed.
+    //
+    // ── head: three straight forehead stripes at fixed x (asset 0 / ±0.082).
+    // Painted as thin vertical slabs, not meridians: meridians converge at the
+    // crown and the three stripes merge into one blob there.
+    for (const [xc, w] of [[-0.084, 0.0105], [0, 0.012], [0.084, 0.0105]] as const) {
+      this.paint(
+        slab(hd(xc, 0.27, 0.1), [1, 0, 0], w, 0.25),
+        stripe, 0.004, 1, PI.head,
+      );
+    }
+    // ── two horizontal cheek dashes beside each eye (asset y -0.035 / -0.105
+    //    over |x| 0.40 … 0.58) ──
+    for (const s of [1, -1] as const) {
+      for (const y of [-0.035, -0.105]) {
+        this.paint(
+          slab(hd(s * 0.46, y, 0.3), [0, 1, 0], 0.0085, 0.15),
+          stripe, 0.005, 1, PI.head,
+        );
+      }
+    }
+    // ── three stripes running down the back of the head ──
+    for (const a of [-30, 0, 30]) {
+      this.stroke(
+        [this.headAt(180 + a, -0.1), this.headAt(180 + a, 0.1), this.headAt(180 + a, 0.3)],
+        0.017, 0.012, stripe, soft,
+      );
+    }
+    // ── torso: five rings over the flanks + one stripe down the spine ──
+    // asset y -> body rest space (anchored on the white belly patch)
+    const SY = (y: number) => (y - 0.892) * 0.6265 - 0.012;
+    // Rings are sampled densely so they hug the barrel instead of cutting a
+    // chord through it (a coarse polyline only shows up as broken fragments).
+    const ring = (y: number, a0: number, a1: number, s: number, r0: number, r1: number, dip: number) => {
+      const pts: V3[] = [];
+      const n = 12;
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
+        pts.push(this.bodyAt(s * (a0 + (a1 - a0) * t), y - dip * Math.sin(Math.PI * t)));
+      }
+      this.stroke(pts, r0, r1, stripe, soft);
+    };
+    for (const ay of [1.15, 0.995, 0.84, 0.69, 0.545]) {
+      for (const s of [1, -1] as const) ring(SY(ay), 42, 146, s, 0.018, 0.026, 0.012);
+    }
+    this.stroke([this.bodyAt(180, SY(0.62)), this.bodyAt(180, SY(0.95)), this.bodyAt(180, SY(1.28))], 0.017, 0.013, stripe, soft);
+    // ── arms: three rings on the upper arm (asset t .2 / .365 / .53) ──
+    const armAt = (t: number) => AY(0.15 - 0.355 * t);
+    for (const a of ["armL", "armR"] as const) {
+      for (const t of [0.2, 0.365, 0.53]) {
+        this.paint(slab(B(a, [0, armAt(t), 0]), Bdir(a, [0, 1, 0]), 0.019, 0.16), stripe, soft);
+      }
+    }
+    // ── legs: two rings just above the sock (asset y .475 / .39) ──
+    for (const l of ["legL", "legR"] as const) {
+      for (const y of [0.05, -0.005]) {
+        this.paint(slab(B(l, [0, y, 0.005]), [0, 1, 0], 0.019, 0.18), stripe, soft);
+      }
+    }
+    this.tailBands(stripe, 4);
+    // ── tall white chest + belly patch (asset ellipse 0.318 × 0.376) ──
+    this.paint(
+      ell("torso", [0, ty(-0.02), 0.29 + 0.1 * (TU.belly - 1)], [0.199 * TU.bodyBottom, 0.236, 0.25]),
+      white, 0.006, 1, PI.torso,
+    );
+    // ── white mittens and socks: a clean cuff line, like the asset's
+    //    "armT > 0.73" / "y < 0.268" colour masks ──
+    for (const a of ["armL", "armR"] as const) {
+      const cut = armAt(0.73);
+      const mx = (a === "armL" ? 1 : -1) * ASSET_LIMB.bow * 0.9;
+      this.paint(slab(B(a, [mx, cut - 0.16, 0.014]), Bdir(a, [0, 1, 0]), 0.16, 0.3), white, 0.008);
+    }
+    for (const l of ["legL", "legR"] as const) {
+      const cut = -0.134;
+      this.paint(slab(B(l, [0, cut - 0.2, 0.02]), [0, 1, 0], 0.2, 0.3), white, 0.01);
+    }
+    this.toes(new THREE.Color(white).multiplyScalar(0.8).lerp(new THREE.Color(0xd8b6a6), 0.3).getHex());
+  }
+  /** Wide white face patch + chin, exactly the shape the exported cat has. */
+  assetMuzzle(col = WHITE) {
+    const soft = 0.006;
+    // asset: one wide oval around the mouth (semi-axes 0.215 × 0.093) ...
+    this.paint(ell("head", hd(0, -0.187, 0.24), hr(0.215, 0.093, 0.3)), col, soft, 1, PI.head);
+    // ... a round chin below it ...
+    this.paint(ell("head", hd(0, -0.32, 0.22), hr(0.133, 0.11, 0.28)), col, soft, 1, PI.head);
+    // ... and the small patch the nose sits on.
+    this.paint(ell("head", hd(0, -0.143, 0.27), hr(0.07, 0.05, 0.3)), col, 0.012, 1, PI.head);
+  }
   limbBands(col: number) {
     for (const a of ["armL", "armR"] as const) {
       this.paint(slab(B(a, [0, AY(-0.02), 0]), Bdir(a, [0, 1, 0]), 0.024, 0.2), col, 0.01);
@@ -676,6 +778,8 @@ interface Recipe {
   mouthCol?: number;
   whisker: number;
   noMouth?: boolean;
+  /** feed the palette to the vertex colours the way the 3D asset does */
+  rawColors?: boolean;
 }
 
 const BLACK = 0x1e1e23;
@@ -685,23 +789,37 @@ const DARK_EAR = 0x2c2a4a;
 
 function recipeFor(id: AnimalId): Recipe {
   type R = Omit<Recipe, "shapes" | "arms" | "paints" | "faceStrokes" | "px" | "py" | "cross" | "lid" | "tilt"> & Partial<Recipe>;
-  const done = (c: Cat, r: R, pad = 0xf4a3b5): Recipe => {
-    c.pads(pad);
+  const done = (c: Cat, r: R, pad = 0xf4a3b5, plainPaws = false): Recipe => {
+    // The exported asset has plain white paws; the pink beans only belong to
+    // the plush look, so they are skipped while the asset shape is active.
+    if (!(plainPaws && getShapeMode() === "asset")) c.pads(pad);
     return { px: 0, py: 0, cross: 0, lid: 0, tilt: 0, ...r, shapes: c.shapes, arms: c.arms, paints: c.paints, faceStrokes: c.faceStrokes };
   };
   switch (id) {
     case "oyen": {
       // the crayon cat: orange tabby, white muzzle/belly/paws, huge green eyes
-      const c = new Cat(0xf0a24a);
-      c.tabby(0xc8641f, 1.05);
-      c.muzzle();
-      c.belly(WHITE);
-      c.paws(WHITE);
-      c.innerEars(PINK_EAR);
+      // palette lifted straight from the exported 3D cat (deeper orange)
+      const c = new Cat(getShapeMode() === "asset" ? 0xe8903e : 0xf0a24a);
+      if (getShapeMode() === "asset") {
+        // markings traced from the exported 3D cat
+        c.tabbyAsset(0xc2652a, 0xf8f3ec);
+        c.assetMuzzle(0xf8f3ec);
+      } else {
+        c.tabby(0xc8641f, 1.05);
+        c.muzzle();
+        c.belly(WHITE);
+        c.paws(WHITE);
+      }
+      c.innerEars(getShapeMode() === "asset" ? 0xf2b6a4 : PINK_EAR);
       return done(c, {
-        eye: "big", iris: 0xc6e79a, cross: 0.35, py: 0.25, lid: 0.12, tilt: 0.3,
-        nose: 0xf28a9a, line: 0x4a2a17, whisker: 0x5a3a26,
-      });
+        eye: "big", iris: getShapeMode() === "asset" ? 0x8bbe5e : 0xc6e79a, cross: 0.35, py: 0.25, lid: 0.12, tilt: 0.3,
+        nose: getShapeMode() === "asset" ? 0xf09aa4 : 0xf28a9a,
+        line: getShapeMode() === "asset" ? 0x3a2416 : 0x4a2a17,
+        whisker: getShapeMode() === "asset" ? 0x6b4122 : 0x5a3a26,
+        // The exported Oyen is the reference here, so its fur is uploaded with
+        // the exact same colour space the asset uses (see the vertex loop).
+        rawColors: getShapeMode() === "asset",
+      }, 0xf4a3b5, true);
     }
     case "oreo": {
       // tuxedo plush, pattern copied from the reference: black body, white moustache muzzle with
@@ -1159,7 +1277,17 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
     for (let q = 1; q < 6; q++) if (partD[q] < partD[dom]) dom = q;
     applyPaints(paints, x, y, z, col, dom);
     const ao = THREE.MathUtils.clamp(sdf(x + nx * 0.06, y + ny * 0.06, z + nz * 0.06) / 0.06, 0.5, 1);
-    col.multiplyScalar(0.9 + 0.1 * ao);
+    if (recipe.rawColors) {
+      // The exported cat feeds its palette (plain sRGB numbers) straight into a
+      // vertex-colour attribute, so the renderer reads them as linear values.
+      // Storing the same numbers here makes the game cat light up exactly like
+      // the 3D preview next to it instead of a darker, browner orange. Its baked
+      // cavity shade is applied in that same raw space, like the asset does.
+      col.convertLinearToSRGB();
+      col.multiplyScalar(ASSET_SHADE.min + ASSET_SHADE.range * ao);
+    } else {
+      col.multiplyScalar(0.9 + 0.1 * ao);
+    }
     colors[i * 3] = col.r;
     colors[i * 3 + 1] = col.g;
     colors[i * 3 + 2] = col.b;
