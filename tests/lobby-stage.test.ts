@@ -18,7 +18,7 @@ test('the hill is flat under the cats and drops away behind them', () => {
     assert(Math.abs(hillY(x, 1)) < 0.1, `front edge ${x} should stay walkable`);
   }
   assert(hillY(0, -14) < hillY(0, 0) - 0.4, 'the hill falls away behind the line-up');
-  assert(hillY(12, 0) < hillY(0, 0) - 0.2, 'the hill rolls off to the sides');
+  assert(hillY(16, 0) < hillY(0, 0) - 0.3, 'the hill rolls off to the sides');
 });
 
 test('the hill scene owns its geometry and frees it on dispose', () => {

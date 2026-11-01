@@ -153,6 +153,7 @@ function LobbyStage({ roster, ready, paused }: StageProps) {
       const h = Math.max(1, el.clientHeight);
       renderer.setSize(w, h, false);
       frameLobbyCamera(camera, roster.length, w / h);
+      distRef.current = camera.position.z;
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -168,22 +169,25 @@ function LobbyStage({ roster, ready, paused }: StageProps) {
     window.addEventListener("pointermove", onPointer, { passive: true });
 
     const head = new THREE.Vector3();
+    // remember the framed distance so the pointer parallax can pull back to it
+    const distRef = { current: 0 };
+    let lastFrame = performance.now();
     let raf = 0;
     const t0 = performance.now();
     const loop = () => {
       raf = requestAnimationFrame(loop);
       if (paused) return;
       const t = (performance.now() - t0) / 1000;
-      camera.updateMatrixWorld();
-      camera.position.x += (pointer.x * 0.34 - camera.position.x) * 0.05;
-      camera.position.y += (1.38 - pointer.y * 0.12 - camera.position.y) * 0.05;
-      camera.lookAt(0, 0.7, 0);
-      camera.updateMatrixWorld();
-      for (const cloud of scenery.clouds) {
-        cloud.position.x += 0.045;
-        if (cloud.position.x > 48) cloud.position.x = -48;
-      }
       const now = performance.now();
+      const dtFrame = Math.min(0.05, (now - lastFrame) / 1000);
+      lastFrame = now;
+      camera.updateMatrixWorld();
+      camera.position.x += (pointer.x * 0.42 - camera.position.x) * 0.05;
+      camera.position.y += (1.62 - pointer.y * 0.14 - camera.position.y) * 0.05;
+      camera.position.z += (distRef.current - camera.position.z) * 0.06;
+      camera.lookAt(0, 1.34, -3);
+      camera.updateMatrixWorld();
+      scenery.update(t, dtFrame);
       for (let i = 0; i < actors.length; i++) {
         const a = actors[i];
         poseStatic(a.v, t + a.phase);
