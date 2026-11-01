@@ -1,7 +1,7 @@
 // Shared skeleton constants (physics ragdoll + skinned mesh bind pose).
 // All values are in the local frame of the body they belong to.
 // The torso-related ones are LIVE bindings recomputed from the shape tuning by applyRig().
-import { getRigTuning, getShapeMode, type Tuning } from "./tuning";
+import { getRigTuning, isSculptedShape, type Tuning } from "./tuning";
 
 export type V3 = [number, number, number];
 
@@ -32,7 +32,7 @@ export function applyRig(t: Tuning = getRigTuning()) {
   const h = t.bodyH;
   BODY_H = h;
   // Keep the socket close to the chest surface, giving the arm room to hang beside the torso.
-  const sw = 0.33 * t.bodyTop * 1.03 + 0.01 + (getShapeMode() === "figure" ? 0.015 : 0);
+  const sw = 0.33 * t.bodyTop * 1.03 + 0.01 + (isSculptedShape() ? 0.015 : 0);
   const hw = 0.19 * (0.6 + 0.4 * t.bodyBottom);
   NECK_A = [0, 0.32 * h, 0];
   NECK_B = [0, -0.24 * t.head, 0];
@@ -63,7 +63,7 @@ export function selfVolumes(t: Tuning = getRigTuning()) {
   // The figurine is sculpted as a continuous upright torso, not the classic
   // pear scaled up. These same volumes drive the visible surface and paw
   // clearance, so the fuller chest cannot swallow a relaxed arm.
-  const torso: Ell[] = getShapeMode() === "figure" ? [
+  const torso: Ell[] = isSculptedShape() ? [
     { c: [0, -0.18 * h, 0], r: [0.4 * bb, 0.42 * h * (0.7 + 0.3 * bb), 0.33 * bb] },
     { c: [0, 0.10 * h, -0.015], r: [0.38 * bt, 0.50 * h * (0.75 + 0.25 * bt), 0.27 * (0.55 + 0.45 * bt)] },
     { c: [0, -0.10 * h, 0.055 + 0.07 * (fat - 1)], r: [0.31 * bb * (0.85 + 0.15 * fat), 0.38 * h * (0.85 + 0.15 * fat), 0.26 * fat] },

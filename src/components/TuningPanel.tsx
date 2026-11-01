@@ -1,9 +1,10 @@
 import { useState } from "react";
-import { TUNING_DEFAULTS, TUNING_SPECS, resetTuning, setTuning, useTuning, type Tuning } from "../game/tuning";
+import { TUNING_DEFAULTS, TUNING_SPECS, resetTuning, setShapeMode, setTuning, useShapeMode, useTuning, type ShapeMode, type Tuning } from "../game/tuning";
 
 /** Live sliders for the cat's proportions (rebuilds the 3D model). */
 export default function TuningPanel({ inline = false }: { inline?: boolean }) {
   const t = useTuning();
+  const shapeMode = useShapeMode();
   const [open, setOpen] = useState(inline);
   const groups = [...new Set(TUNING_SPECS.map((s) => s.group))];
   const changed = (Object.keys(TUNING_DEFAULTS) as (keyof Tuning)[]).some((k) => Math.abs(t[k] - TUNING_DEFAULTS[k]) > 1e-6);
@@ -20,6 +21,21 @@ export default function TuningPanel({ inline = false }: { inline?: boolean }) {
       </button>}
       {panelActive && (
         <div className="mt-2 max-h-[62vh] w-72 overflow-y-auto rounded-2xl bg-slate-900/80 p-3 text-white shadow-2xl backdrop-blur">
+          <div className="mb-3">
+            <div className="mb-1 text-xs font-black uppercase tracking-wider text-pink-300">Bentuk dasar</div>
+            <div className="flex gap-1.5">
+              {([["asset", "Aset 3D"], ["classic", "Klasik"], ["figure", "Figurin"]] as [ShapeMode, string][]).map(([id, label]) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setShapeMode(id)}
+                  className={`flex-1 rounded-xl py-1.5 text-[11px] font-black ${shapeMode === id ? "bg-pink-500 text-white" : "bg-white/15 text-white/80 hover:bg-white/25"}`}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
           {groups.map((g) => (
             <div key={g} className="mb-3">
               <div className="mb-1 text-xs font-black uppercase tracking-wider text-pink-300">{g}</div>

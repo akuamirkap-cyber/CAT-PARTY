@@ -5,7 +5,7 @@ import type { AccessoryId, AnimalDef, AnimalId } from "./animals";
 import type { EyeStyleId, ExpressionId } from "./eyes";
 import * as rig from "./rig";
 import type { V3 } from "./rig";
-import { getRigTuning, getShapeMode, tuningKey, TUNING_DEFAULTS, type Tuning } from "./tuning";
+import { getRigTuning, getShapeMode, isSculptedShape, tuningKey, TUNING_DEFAULTS, type Tuning } from "./tuning";
 
 /* =====================================================================
  *  Shared material helper (used by the arena too)
@@ -80,7 +80,7 @@ const PAW = () => AY(-0.205);
 /** leg-local y stretched by the leg length tuning (hip pivot fixed) */
 const LY = (y: number) => rig.LIMB_TOP[1] + (y - rig.LIMB_TOP[1]) * TU.legH;
 /** Keep the existing sock and toe markings attached to the reshaped feet. */
-const figureFootOffset = () => getShapeMode() === "figure" ? 0.1 * (0.7 + 0.3 * TU.legTip) * 0.22 + 0.035 : 0;
+const figureFootOffset = () => isSculptedShape() ? 0.1 * (0.7 + 0.3 * TU.legTip) * 0.22 + 0.035 : 0;
 
 /** head-local point -> bind space */
 const hd = (x: number, y: number, z: number): V3 => [x * HS, y * HS + HO, z * HS];
@@ -373,7 +373,7 @@ class Cat {
     const ny = T.noseY, ns = 0.65 + 0.35 * T.noseSize;
     const fat = T.belly;
     const mk = T.mouth;
-    if (getShapeMode() === "figure") {
+    if (isSculptedShape()) {
       // Figurine silhouette: a full upright chest flows into a softly rounded
       // pelvis and into the head, instead of enlarging the classic pear.
       const volumes = rig.selfVolumes(T).torso;
@@ -411,7 +411,7 @@ class Cat {
     // arms are separate rigid pieces with a ball joint buried in the shoulder:
     // rotating around the pivot never stretches the body skin (no flaps / "gelambir")
     for (const a of ["armL", "armR"] as const) {
-      const figure = getShapeMode() === "figure";
+      const figure = isSculptedShape();
       if (figure) {
         // One continuous tapered capsule avoids the stacked, swollen look of
         // overlapping shoulder and forearm blobs. The mitten blends softly
@@ -438,7 +438,7 @@ class Cat {
     // ---- short stubby legs with round feet ----
     const lr = T.legRoot, lt = T.legTip;
     for (const l of ["legL", "legR"] as const) {
-      const figure = getShapeMode() === "figure";
+      const figure = isSculptedShape();
       this.add(cone(l, B(l, [0, 0.08, 0]), B(l, [0, LY(-0.17), 0.02]), (figure ? 0.18 : 0.14) * lr, (figure ? 0.17 : 0.135) * (0.5 * lr + 0.5 * lt), 0.08));
       // A wider, flatter foot blends into the leg like the reference figure;
       // its bottom stays at the same height as the classic foot.
@@ -958,7 +958,7 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   NO_EARS = false;
   const { paints } = recipe;
   const buildGeo = (shapes: Shape[], rigid: "arms" | "head" | null) => {
-  const figure = getShapeMode() === "figure";
+  const figure = isSculptedShape();
   const grooves: Shape[] = [];
   if (figure && !rigid) {
     const lt = TU.legTip, footY = LY(-0.25) - figureFootOffset();
@@ -2551,8 +2551,8 @@ export function poseStatic(v: CharacterVisual, t: number) {
   // The small shoulder spread keeps the paws clear of the rounded body.
   const sway = Math.sin(t * 1.6) * 0.025;
   // Palms naturally face inwards; their existing markings remain on the palm.
-  const palmTurn = getShapeMode() === "figure" ? 1.1 : 0;
-  const armSpread = getShapeMode() === "figure" ? 0.37 : 0.39;
+  const palmTurn = isSculptedShape() ? 1.1 : 0;
+  const armSpread = isSculptedShape() ? 0.37 : 0.39;
   setLimb(v.armL, rig.SHOULDER_L, base, 0.08, armSpread + sway, -palmTurn);
   setLimb(v.armR, rig.SHOULDER_R, base, 0.08, -armSpread - sway, palmTurn);
   setLimb(v.legL, rig.HIP_L, base, 0, 0.04);
