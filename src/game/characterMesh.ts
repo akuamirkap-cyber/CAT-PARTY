@@ -89,7 +89,7 @@ export const ASSET_LIMB = {
   /** arm tube radius multiplier (asset: tube 0.075 vs mitten 0.087) */
   armR: 1.0,
   /** paw radius multiplier */
-  pawR: 0.94,
+  pawR: 1.0,
   /** shin radius multiplier */
   thighR: 1.06,
   /** how much the shin narrows at the ankle (1 = no taper) */
@@ -551,8 +551,10 @@ class Cat {
           // pops out of the cheek as a little pointed flap.
           const tuck = t < 0.1 ? ((0.1 - t) / 0.26) * 0.085 : 0;
           pts.push(B(a, [q.x - tuck * Math.sign(bow), q.y, q.z]));
-          // Asset arm tapers from a thick shoulder to a slimmer wrist.
-          radii.push(rTop * (1.12 - 0.2 * Math.min(1, Math.max(0, t + 0.1))));
+          // Asset arm tapers from a thick shoulder to a slimmer wrist, but the
+          // forearm stays full: the sculpt's tube only steps down right at the
+          // mitten, it does not whittle away along the whole arm.
+          radii.push(rTop * (1.12 - 0.13 * Math.min(1, Math.max(0, t + 0.1))));
         }
         const arm = tube(a, pts, radii, 0.03);
         arm.col.setHex(this.fur);
@@ -560,7 +562,9 @@ class Cat {
         // The mitten is a soft ball that blends into the wrist (asset k = 0.07)
         // instead of a separate sphere stuck on the end.
         const pawR = 0.0765 * kA * ASSET_LIMB.pawR;
-        const paw = ell(a, B(a, [bow * 0.96, PAW() - 0.012, 0.03]), [pawR, pawR * 1.12, pawR * 1.08], 0.05);
+        // A softer blend (asset k ~0.07) melts the mitten into the wrist instead
+        // of leaving a ball stuck on the end of the arm.
+        const paw = ell(a, B(a, [bow * 0.96, PAW() - 0.006, 0.03]), [pawR * 1.06, pawR * 1.14, pawR * 1.06], 0.07);
         paw.col.setHex(this.fur);
         this.arms.push(paw);
       } else {
@@ -813,7 +817,7 @@ class Cat {
     const armAt = (t: number) => AY(0.15 - 0.355 * t);
     for (const a of ["armL", "armR"] as const) {
       for (const t of [0.2, 0.365, 0.53]) {
-        this.paint(slab(B(a, [0, armAt(t), 0]), Bdir(a, [0, 1, 0]), 0.019, 0.16), stripe, soft);
+        this.paint(slab(B(a, [0, armAt(t), 0]), Bdir(a, [0, 1, 0]), 0.021, 0.16), stripe, 0.009);
       }
     }
     // ── legs: two rings just above the sock ──
@@ -852,8 +856,22 @@ class Cat {
       // made the whole forearm read as one white blob next to the belly.
       const mx = (a === "armL" ? 1 : -1) * ASSET_LIMB.bow;
       const pr = 0.0765 * (0.7 * TU.armRoot + 0.3 * TU.armTip) * ASSET_LIMB.armR * ASSET_LIMB.pawR;
-      // Mask the whole mitten (round bottom) instead of cutting a flat cuff.
-      this.paint(ell(a, B(a, [mx * 0.96, PAW() - 0.012, 0.03]), [pr * 1.15, pr * 1.3, pr * 1.2]), white, 0.011);
+      // The whole mitten is white, cut by a cuff ring just above the paw ball
+      // (the sculpt masks it with `armT > 0.73`, i.e. only the last stretch of
+      // the arm). A slab gives the same clean, high-contrast cut the legs have.
+      const cuffY = PAW() + 0.046;
+      this.paint(slab(B(a, [0, cuffY - 0.11, 0.03]), Bdir(a, [0, 1, 0]), 0.11, 0.22), white, 0.008);
+      // Torn cuff: the sculpt draws that boundary with the same fur noise as
+      // the socks, so it is ragged instead of a clean ring.
+      for (let i = 0; i < 13; i++) {
+        const a2 = (i / 13) * Math.PI * 2;
+        const jy = 0.008 * Math.sin(i * 2.31) + 0.006 * Math.cos(i * 4.7);
+        this.paint(
+          ell(a, B(a, [mx * 0.96 + Math.cos(a2) * pr * 0.52, cuffY - 0.012 + jy, 0.03 + Math.sin(a2) * pr * 0.52]),
+            [pr * 0.46, 0.024, pr * 0.46]),
+          white, 0.006,
+        );
+      }
     }
     for (const l of ["legL", "legR"] as const) {
       // Asset sock top is model y 0.238-0.268, i.e. ~0.11 of body height above
