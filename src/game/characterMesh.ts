@@ -93,15 +93,17 @@ export const ASSET_LIMB = {
   /** shin radius multiplier */
   thighR: 1.06,
   /** how much the shin narrows at the ankle (1 = no taper) */
-  ankle: 0.82,
+  ankle: 1.04,
   /** foot half-width / half-depth / half-height multipliers */
-  footW: 1.05,
-  footD: 1.02,
-  footH: 0.95,
+  footW: 1.14,
+  footD: 1.22,
+  footH: 1.26,
   /** forward offset of the foot (the paw points at the camera) */
-  footFwd: 0.055,
+  footFwd: 0.063,
   /** softness of the ankle -> paw transition (bigger = smoother boot) */
   footBlend: 0.085,
+  /** the sculpt's legs sit a little outside the hip pivot (x of the shin) */
+  legOut: 0.028,
   /** how wide the hanging arms sit in the idle pose (asset arms hang close) */
   armSpread: 0.05,
 };
@@ -113,12 +115,20 @@ const FOOT_FWD = () => ASSET_LIMB.footFwd;
 const LY = (y: number) => rig.LIMB_TOP[1] + (y - rig.LIMB_TOP[1]) * TU.legH;
 /** Keep the existing sock and toe markings attached to the reshaped feet. */
 const figureFootOffset = () => isSculptedShape() ? 0.1 * (0.7 + 0.3 * TU.legTip) * 0.22 + 0.035 : 0;
+/** outward offset of the sculpted leg columns in leg-local space */
+const LEG_OUT = () => (isSculptedShape() ? ASSET_LIMB.legOut : 0);
+/** vertical radius of the sculpted paw */
+const footRY = () => 0.125 * TU.legTip * ASSET_LIMB.footH;
+/** the floor line expressed in leg-local coordinates */
+const legLocalGround = () => -rig.HOVER + 0.003 - (rig.HIP_L[1] - rig.LIMB_TOP[1]);
 /**
- * Centre of the sculpted paw. It sits low enough for the ground plane to cut a
- * flat sole (the asset's foot is deepest right at the floor and tapers up),
- * instead of leaving a ball floating at the end of the shin.
+ * Centre of the sculpted paw. The asset's paw is a plump ball whose widest
+ * point sits roughly a quarter of its height *above* the floor, with the sole
+ * cut flat by the ground — ours used to sit almost on the floor, so the shape
+ * degraded into a cone that flares down into a slab. Anchoring the centre to
+ * the floor with the same 0.73 ratio gives the same rounded boot.
  */
-const footCenterY = () => LY(-0.25) - figureFootOffset() + 0.052 * ASSET_LIMB.footH - 0.078;
+const footCenterY = () => legLocalGround() + 0.73 * footRY() - 0.014;
 
 /** head-local point -> bind space */
 const hd = (x: number, y: number, z: number): V3 => [x * HS, y * HS + HO, z * HS];
@@ -577,7 +587,7 @@ class Cat {
         // Nearly cylindrical shin: the asset's legs keep their thickness all the
         // way down, only rounding off at the paw.
         const kL = (0.6 * lr + 0.4 * lt) * ASSET_LIMB.thighR;
-        this.add(cone(l, B(l, [0, 0.115, 0]), B(l, [0, LY(-0.20), 0.02]),
+        this.add(cone(l, B(l, [LEG_OUT(), 0.115, 0]), B(l, [LEG_OUT(), LY(-0.20), 0.02]),
           0.148 * kL, 0.145 * kL * ASSET_LIMB.ankle, 0.05));
       } else {
         this.add(cone(l, B(l, [0, 0.08, 0]), B(l, [0, LY(-0.17), 0.02]), 0.14 * lr, 0.135 * (0.5 * lr + 0.5 * lt), 0.08));
@@ -598,7 +608,7 @@ class Cat {
         // ankle crease visible.
         // Smooth plump paw that melts into the shin (the ground cut flattens the
         // sole), so the leg reads as one soft boot like the asset's.
-        this.add(ell(l, B(l, [0, footCenterY(), FOOT_FWD()]), [
+        this.add(ell(l, B(l, [LEG_OUT(), footCenterY(), FOOT_FWD()]), [
           0.156 * lt * ASSET_LIMB.footW,
           0.125 * lt * ASSET_LIMB.footH,
           0.212 * lt * ASSET_LIMB.footD,
@@ -657,7 +667,17 @@ class Cat {
   paws(col: number, soft = 0.008) {
     const at = TU.armTip, lt = TU.legTip;
     for (const a of ["armL", "armR"] as const) this.paint(ell("torso", B(a, [0, PAW() - 0.025 * at, 0.0]), [0.17 * at, 0.13 * at, 0.17 * at]), col, soft);
-    for (const l of ["legL", "legR"] as const) this.paint(ell("torso", B(l, [0, LY(-0.25) - figureFootOffset(), 0.07]), [0.22 * lt, 0.13, 0.26 * lt]), col, soft);
+    for (const l of ["legL", "legR"] as const) {
+      if (isSculptedShape()) {
+        this.paint(ell("torso", B(l, [LEG_OUT(), footCenterY() + 0.01, FOOT_FWD() + 0.02]), [
+          0.156 * lt * ASSET_LIMB.footW * 1.16,
+          footRY() * 1.25,
+          0.212 * lt * ASSET_LIMB.footD * 1.1,
+        ]), col, soft);
+      } else {
+        this.paint(ell("torso", B(l, [0, LY(-0.25) - figureFootOffset(), 0.07]), [0.22 * lt, 0.13, 0.26 * lt]), col, soft);
+      }
+    }
     this.toes(new THREE.Color(col).multiplyScalar(0.78).lerp(new THREE.Color(0xe39aae), 0.45).getHex());
   }
   /** little toe grooves on the front of the feet */
@@ -665,7 +685,19 @@ class Cat {
     const lt = TU.legTip;
     for (const l of ["legL", "legR"] as const) {
       for (const dx of [-0.05, 0, 0.05]) {
-        this.paint(slab(B(l, [dx * lt, LY(-0.31) - figureFootOffset(), 0.2 * lt]), [1, 0, 0], 0.0055, 0.06), col, 0.004);
+        if (isSculptedShape()) {
+          // Shallow painted creases on the front of the paw, like the sculpt's
+          // toe lines (carving them into the mesh only made spikes).
+          // Deep in z so the paw surface always passes through the shape, thin
+          // in x and tall in y: the trace on the paw is one clean crease.
+          this.paint(
+            ell("torso", B(l, [LEG_OUT() + dx * lt, footCenterY() + 0.26 * footRY(), FOOT_FWD()]),
+              [0.0085, 0.075, 0.2]),
+            col, 0.009,
+          );
+        } else {
+          this.paint(ell("torso", B(l, [dx * lt, LY(-0.31) - figureFootOffset(), 0.2 * lt]), [0.008, 0.02, 0.06]), col, 0.005);
+        }
       }
     }
   }
@@ -824,7 +856,9 @@ class Cat {
       const cut = footCenterY() + 0.18;
       this.paint(slab(B(l, [0, cut - 0.22, 0.02]), [0, 1, 0], 0.22, 0.3), white, 0.01);
     }
-    this.toes(new THREE.Color(white).multiplyScalar(0.8).lerp(new THREE.Color(0xd8b6a6), 0.3).getHex());
+    // The sculpt's toe creases read as pale seams catching the light, not as
+        // dark lines: paint them just above the sock white.
+        this.toes(new THREE.Color(white).multiplyScalar(0.78).lerp(new THREE.Color(0xc9bdb0), 0.5).getHex());
   }
   /** Wide white face patch + chin, exactly the shape the exported cat has. */
   assetMuzzle(col = WHITE) {
@@ -1282,15 +1316,9 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   const { paints } = recipe;
   const buildGeo = (shapes: Shape[], rigid: "arms" | "head" | null, contact: Shape[] = []) => {
   const figure = isSculptedShape();
+  // The sculpt's toe creases are shading, not geometry: carving them at this
+  // mesh resolution only produced spikes, so they are painted instead.
   const grooves: Shape[] = [];
-  if (figure && !rigid) {
-    const lt = TU.legTip, footY = LY(-0.25) - figureFootOffset();
-    for (const leg of ["legL", "legR"] as const) {
-      for (const x of [-0.062, 0.062]) {
-        grooves.push(ell(leg, B(leg, [x * lt, footCenterY() - 0.016, FOOT_FWD() + 0.238 * lt * ASSET_LIMB.footD]), [0.016, 0.045, 0.026]));
-      }
-    }
-  }
   // A gently grounded sole on the figurine rather than ball-shaped feet.
   // Cut only the body mesh in bind space; the separate hands remain untouched.
   // Crotch slit: the sculpt's legs are two separate columns, so their inner
@@ -1308,8 +1336,8 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
     if (figure && !rigid) {
       d = Math.max(d, -rig.HOVER + 0.003 - y);
       for (const g of grooves) {
-        if (Math.abs(x - g.c[0]) < 0.02 && Math.abs(y - g.c[1]) < 0.06 && Math.abs(z - g.c[2]) < 0.04) {
-          d = -smin(-d, shapeDist(g, x, y, z), 0.015);
+        if (Math.abs(x - g.c[0]) < 0.025 && Math.abs(y - g.c[1]) < 0.07 && Math.abs(z - g.c[2]) < 0.08) {
+          d = -smin(-d, shapeDist(g, x, y, z), 0.012);
         }
       }
     }
