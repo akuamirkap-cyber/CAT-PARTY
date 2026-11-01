@@ -344,7 +344,16 @@ body,
 .mm-screen button:focus-visible { outline: 3px solid #7a3d00; outline-offset: 3px; }
 .mm-sun { position: absolute; left: 50%; top: 44%; width: 72vw; height: 72vw; transform: translate(-50%, -50%); border-radius: 50%; background: radial-gradient(circle, rgba(255,241,180,.5), rgba(255,241,180,0) 62%); pointer-events: none; }
 .mm-horizon { position: absolute; inset: auto 0 0 0; height: 42%; background: radial-gradient(ellipse at 50% 0%, rgba(255,214,90,.55), transparent 70%); pointer-events: none; }
-.mm-stage-box { position: absolute; left: 26%; right: 21%; top: 4%; bottom: 16%; z-index: 1; }
+.mm-stage-box { position: absolute; left: 25%; right: 36%; top: 4%; bottom: 16%; z-index: 1; }
+
+/* the accurate SDF cat asset, standing to the right of the menu lineup */
+.mm-asset-box { position: absolute; top: 6%; bottom: 15%; right: calc(clamp(16px, 4.2vw, 64px) + clamp(170px, 15vw, 238px) + 8px); width: clamp(178px, 17vw, 258px); z-index: 2; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 6px; pointer-events: none; opacity: 0; animation: mmAssetIn .65s .35s cubic-bezier(.3,1.4,.5,1) forwards; }
+@keyframes mmAssetIn { from { opacity: 0; transform: translateX(20px) scale(.94); } to { opacity: 1; transform: none; } }
+.mm-asset-stage { position: relative; flex: 1 1 auto; width: 100%; min-height: 120px; }
+.mm-asset-stage::after { content: ""; position: absolute; inset: auto 8% 2% 8%; height: 26px; border-radius: 50%; background: radial-gradient(ellipse at 50% 50%, rgba(255,224,140,.55), rgba(255,224,140,0) 70%); z-index: -1; }
+.mm-asset-tag { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px; border-radius: 999px; background: rgba(255,248,236,.8); color: #8a5a1c; font-family: "Nunito", system-ui, sans-serif; font-size: 10px; font-weight: 900; letter-spacing: .04em; white-space: nowrap; box-shadow: 0 3px 0 rgba(150,80,0,.16); }
+.mm-asset-tag i { font-style: normal; color: #b45309; letter-spacing: .1em; }
+.mm-asset-note { position: absolute; left: 50%; top: 52%; transform: translate(-50%, -50%); width: max-content; max-width: 96%; padding: 6px 10px; border-radius: 10px; background: rgba(59,42,26,.66); color: #ffeccc; font-family: "Nunito", system-ui, sans-serif; font-size: 10.5px; font-weight: 800; text-align: center; }
 
 .mm-top { position: absolute; top: 16px; left: clamp(16px, 4.2vw, 64px); right: clamp(16px, 4.2vw, 64px); display: flex; align-items: center; justify-content: space-between; gap: 10px; z-index: 5; }
 .mm-brand { display: flex; align-items: center; gap: 10px; }
@@ -486,8 +495,14 @@ body,
 
 @media (max-width: 1180px) {
   .mm-side { width: 178px; }
+  .mm-stage-box { right: 40%; }
+  .mm-asset-box { right: calc(clamp(16px, 4.2vw, 64px) + 186px); width: clamp(150px, 15vw, 200px); }
   .mm-chip-level { display: none; }
   .mm-item { padding-right: 18px; }
+}
+@media (max-width: 1000px) {
+  .mm-asset-box { right: 7%; width: clamp(140px, 20vw, 190px); top: 10%; bottom: 20%; }
+  .mm-stage-box { right: 32%; }
 }
 @media (max-width: 900px) and (min-width: 701px) {
   .mm-side { display: none; }
@@ -507,6 +522,7 @@ body,
   .mm-icon svg { width: 17px; height: 17px; }
   .mm-mode-chip { display: flex; align-items: center; height: 38px; font-size: 12px; padding: 0 11px; }
   .mm-stage-box { left: -6%; right: -6%; top: 62px; bottom: auto; height: 40vh; }
+  .mm-asset-box { display: none; }
   .mm-picker { top: calc(62px + 40vh - 6px); bottom: auto; }
   .mm-picker-name { min-width: 120px; }
   .mm-picker-name strong { font-size: 21px; }

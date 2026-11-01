@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { ArrowLeft, ArrowRight, Bomb, Cat, CircleHelp, Eye, Gamepad2, PawPrint, Settings2, Shirt, SlidersHorizontal, Sparkles, Swords, UsersRound } from "lucide-react";
+import AssetCatPreview from "./AssetCatPreview";
 import LineupPreview from "./LineupPreview";
 import { animalById, type AccessoryId, type AnimalId } from "../game/animals";
 import type { EyeStyleId, ExpressionId } from "../game/eyes";
@@ -82,6 +83,8 @@ export default function MenuScreen(props: Props) {
       <div className="mm-stage-box">
         <LineupPreview selected={selected} accessory={accessory} eyeStyle={eyeStyle} expression={expression} active={active} />
       </div>
+      {/* the exported "accurate 3D cat" asset (no hat), standing to the right of the lineup */}
+      <AssetCatPreview animal={selected} active={active} />
 
       <header className="mm-top">
         <div className="mm-brand">

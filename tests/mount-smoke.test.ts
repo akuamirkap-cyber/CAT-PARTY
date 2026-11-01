@@ -40,6 +40,18 @@ globalThis.IntersectionObserver = class {
   unobserve() {}
   disconnect() {}
 };
+/** No-op worker: the asset cat keeps loading instead of baking meshes in the test. */
+globalThis.Worker = class {
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  postMessage() {}
+  terminate() {}
+  addEventListener() {}
+  removeEventListener() {}
+  dispatchEvent() {
+    return true;
+  }
+} as unknown as typeof Worker;
 globalThis.matchMedia = (() => ({
   matches: false,
   addEventListener() {},
@@ -173,6 +185,7 @@ test('menu screen renders even when every canvas fails', async () => {
   assert.ok(html.includes('mm-screen'), 'menu renders');
   assert.ok(!html.includes('crash-note'), 'no crash fallback');
   assert.ok(html.includes('lineup-fallback'), 'stage explains the missing 3D');
+  assert.ok(html.includes('mm-asset-box'), 'the accurate 3D asset gets its own slot on the right');
   assert.ok(html.includes('MAIN'), 'the play button survives');
   await unmount(root);
   setRendererFactoryForTests(null);
