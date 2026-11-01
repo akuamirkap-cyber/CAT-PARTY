@@ -85,11 +85,11 @@ const PAW = () => AY(-0.205);
  */
 export const ASSET_LIMB = {
   /** outward bow of the hanging arm (asset arms clear the belly) */
-  bow: 0.085,
+  bow: 0.075,
   /** arm tube radius multiplier (asset: tube 0.075 vs mitten 0.087) */
   armR: 1.0,
   /** paw radius multiplier */
-  pawR: 1.0,
+  pawR: 0.94,
   /** shin radius multiplier */
   thighR: 1.06,
   /** how much the shin narrows at the ankle (1 = no taper) */
@@ -128,7 +128,7 @@ const hr = (x: number, y: number, z: number): V3 => [x * HS, y * HS, z * HS];
  *  Signed distance primitives
  * ===================================================================== */
 interface Shape {
-  t: 0 | 1 | 2 | 3 | 4; // ellipsoid | round cone | slab | curved tail | rounded box
+  t: 0 | 1 | 2 | 3 | 4 | 5; // ellipsoid | round cone | slab | tube | rounded box | face patch
   part: number;
   k: number; // smooth-union radius
   col: THREE.Color;
@@ -225,6 +225,28 @@ function tailTube(points: V3[], radii: number[], k = 0): Shape {
   }
   return s;
 }
+/** The same continuous tube, but attached to any limb part (arms, legs, tail). */
+function tube(part: PartName, points: V3[], radii: number[], k = 0): Shape {
+  const s = tailTube(points, radii, k);
+  s.part = PI[part];
+  // Keep the centre inside the shard so the paint/frustum culling stays sane.
+  return s;
+}
+/**
+ * A flat elliptical patch that hugs the front of the head. An ellipsoid can't
+ * do this job: the face is almost flat over the muzzle, so a small sphere
+ * either misses the skin entirely or has to grow big enough to wrap the whole
+ * skull. This paints an ellipse in x/y and only the shell `halfZ` deep in z.
+ */
+function fpatch(part: PartName, c: V3, rx: number, ry: number, halfZ = 0.3): Shape {
+  const s = blank(part, 0, 0, 0.02);
+  s.t = 5;
+  s.c = c;
+  s.r = [rx, ry, halfZ];
+  s.bc = c;
+  s.br = Math.max(rx, ry, halfZ);
+  return s;
+}
 function slab(c: V3, n: V3, th: number, R: number): Shape {
   const s = blank("torso", 0, 0, 0.02);
   s.t = 2;
@@ -245,6 +267,16 @@ function shapeDist(s: Shape, x: number, y: number, z: number): number {
     const k1 = Math.sqrt(qx * qx + qy * qy + qz * qz);
     if (k1 < 1e-9) return -Math.min(s.r[0], s.r[1], s.r[2]);
     return (k0 * (k0 - 1)) / k1;
+  }
+  if (s.t === 5) {
+    // elliptical disc: radial distance to the ellipse edge, intersected with
+    // a thin shell along z so the patch stays on the face it was drawn for
+    const dx = (x - s.c[0]) / s.r[0];
+    const dy = (y - s.c[1]) / s.r[1];
+    const e = Math.sqrt(dx * dx + dy * dy);
+    const flat = (e - 1) * Math.min(s.r[0], s.r[1]);
+    const band = Math.abs(z - s.c[2]) - s.r[2];
+    return Math.max(flat, band);
   }
   if (s.t === 4) {
     const radius = s.ra;
@@ -461,26 +493,43 @@ class Cat {
         const sage = a === "armL" ? 1 : -1;
         const bow = ARM_BOW() * sage;
         const rTop = 0.0665 * kA;
-        const chain = [
-          // Bury the top of the tube inside the chest so the shoulder reads as
-          // part of the body instead of a sausage stuck onto the flank.
-          { p: B(a, [-bow * 0.12, AY(0.235), -0.006]), r: rTop * 0.9, cs: 0.05 },
-          { p: B(a, [bow * 0.05, rig.LIMB_TOP[1], 0]), r: rTop * 0.97, cs: 0.04 },
-          { p: B(a, [bow * 0.3, AY(0.075), 0.004]), r: rTop * 1.0, cs: 0.03 },
-          { p: B(a, [bow * 0.58, AY(-0.005), 0.01]), r: rTop * 1.02, cs: 0.03 },
-          { p: B(a, [bow * 0.78, AY(-0.075), 0.014]), r: rTop * 1.03, cs: 0.03 },
-          { p: B(a, [bow * 0.92, AY(-0.14), 0.016]), r: rTop * 1.04, cs: 0.03 },
-          { p: B(a, [bow, AY(-0.185), 0.017]), r: rTop * 1.05, cs: 0.03 },
-        ];
-        for (let i = 0; i < chain.length - 1; i++) {
-          const seg = cone(a, chain[i].p, chain[i + 1].p, chain[i].r, chain[i + 1].r, chain[i + 1].cs);
-          seg.col.setHex(this.fur);
-          this.arms.push(seg);
+        // One continuous tube along the traced asset curve (shoulder -> gentle
+        // elbow bow -> wrist). A chain of separate cones left visible rings
+        // where the pieces met, which is what made the arm look "weird".
+        const P0: [number, number, number] = [0.36, 1.26, 0.03];
+        const P1: [number, number, number] = [0.54, 1.0, 0.06];
+        const P2: [number, number, number] = [0.52, 0.7, 0.1];
+        // Asset y 1.26 (shoulder) .. 0.61 (paw centre) maps to arm-local
+        // +0.20 .. -0.22, so the arm hangs from the real shoulder joint all
+        // the way down to the knee instead of stopping at mid-chest.
+        const SY = 0.7, SH = 1.26, SX = 0.16, SZ = 0.5;
+        const curvePt = (t: number) => {
+          const u = 1 - t;
+          const ax = u * u * P0[0] + 2 * u * t * P1[0] + t * t * P2[0];
+          const ay = u * u * P0[1] + 2 * u * t * P1[1] + t * t * P2[1];
+          const az = u * u * P0[2] + 2 * u * t * P1[2] + t * t * P2[2];
+          return { x: ((ax - P0[0]) / SX) * bow, y: 0.2 + (ay - SH) * SY, z: (az - P0[2]) * SZ };
+        };
+        const pts: V3[] = [];
+        const radii: number[] = [];
+        const N = 9;
+        for (let i = 0; i <= N; i++) {
+          const t = -0.16 + (i / N) * 1.14; // start buried in the chest, end past the wrist
+          const q = curvePt(t);
+          // Tuck the buried end towards the centre line, otherwise the tube
+          // pops out of the cheek as a little pointed flap.
+          const tuck = t < 0.1 ? ((0.1 - t) / 0.26) * 0.085 : 0;
+          pts.push(B(a, [q.x - tuck * Math.sign(bow), q.y, q.z]));
+          // Asset arm tapers from a thick shoulder to a slimmer wrist.
+          radii.push(rTop * (1.12 - 0.2 * Math.min(1, Math.max(0, t + 0.1))));
         }
+        const arm = tube(a, pts, radii, 0.03);
+        arm.col.setHex(this.fur);
+        this.arms.push(arm);
         // The mitten is a soft ball that blends into the wrist (asset k = 0.07)
         // instead of a separate sphere stuck on the end.
         const pawR = 0.0765 * kA * ASSET_LIMB.pawR;
-        const paw = ell(a, B(a, [bow * 1.04, PAW() - 0.012, 0.018]), [pawR, pawR * 1.08, pawR * 1.06], 0.05);
+        const paw = ell(a, B(a, [bow * 0.96, PAW() - 0.012, 0.03]), [pawR, pawR * 1.12, pawR * 1.08], 0.05);
         paw.col.setHex(this.fur);
         this.arms.push(paw);
       } else {
@@ -719,8 +768,11 @@ class Cat {
     }
     this.tailBands(stripe, 4);
     // ── tall white chest + belly patch (asset ellipse 0.318 × 0.376) ──
+    // The exported cat's belly ellipse is 0.318 x 0.376 and runs from the
+    // crotch all the way up to the neck, so it is taller and sits higher than
+    // the old plush bib.
     this.paint(
-      ell("torso", [0, ty(-0.02), 0.29 + 0.1 * (TU.belly - 1)], [0.199 * TU.bodyBottom, 0.236, 0.25]),
+      ell("torso", [0, ty(0.01), 0.29 + 0.1 * (TU.belly - 1)], [0.218, 0.256, 0.25]),
       white, 0.006, 1, PI.torso,
     );
     // ── white mittens and socks: a clean cuff line, like the asset's
@@ -731,8 +783,7 @@ class Cat {
       const mx = (a === "armL" ? 1 : -1) * ASSET_LIMB.bow;
       const pr = 0.0765 * (0.7 * TU.armRoot + 0.3 * TU.armTip) * ASSET_LIMB.armR * ASSET_LIMB.pawR;
       // Mask the whole mitten (round bottom) instead of cutting a flat cuff.
-      this.paint(ell(a, B(a, [mx * 1.04, PAW() - 0.006, 0.018]), [pr * 1.14, pr * 1.3, pr * 1.2]), white, 0.009);
-      this.paint(slab(B(a, [mx * 0.95, PAW() + 0.085, 0.018]), Bdir(a, [0, 1, 0]), 0.03, 0.2), white, 0.006);
+      this.paint(ell(a, B(a, [mx * 0.96, PAW() - 0.012, 0.03]), [pr * 1.15, pr * 1.3, pr * 1.2]), white, 0.011);
     }
     for (const l of ["legL", "legR"] as const) {
       const cut = footCenterY() + 0.18;
@@ -742,13 +793,21 @@ class Cat {
   }
   /** Wide white face patch + chin, exactly the shape the exported cat has. */
   assetMuzzle(col = WHITE) {
-    const soft = 0.006;
-    // asset: one wide oval around the mouth (semi-axes 0.215 × 0.093) ...
-    this.paint(ell("head", hd(0, -0.187, 0.24), hr(0.215, 0.093, 0.3)), col, soft, 1, PI.head);
-    // ... a round chin below it ...
-    this.paint(ell("head", hd(0, -0.32, 0.22), hr(0.133, 0.11, 0.28)), col, soft, 1, PI.head);
-    // ... and the small patch the nose sits on.
-    this.paint(ell("head", hd(0, -0.143, 0.27), hr(0.07, 0.05, 0.3)), col, 0.012, 1, PI.head);
+    const soft = 0.008;
+    // White mask traced from the exported cat: a wide "ω" mouth oval with
+    // fluffy cheeks and a slim chin bridge. Our head is a different mesh, so
+    // these are flat patches pinned to the real face front (z ~ 0.55 head
+    // local) instead of spheres buried inside the skull — that is why the
+    // pattern never showed up before.
+    const F = 0.55;
+    const patch = (x: number, y: number, rx: number, ry: number, z = F, sft = soft) =>
+      this.paint(fpatch("head", hd(x, y, z), hr(rx, ry, 0.2)[0], hr(rx, ry, 0.2)[1], hr(rx, ry, 0.2)[2]), col, sft, 1, PI.head);
+    // wide oval around the mouth (asset: y -0.37 … -0.15 in head units)
+    patch(0, -0.25, 0.22, 0.115);
+    // fluffy cheeks flanking it
+    for (const s of [1, -1] as const) patch(s * 0.16, -0.27, 0.105, 0.085, F - 0.005, 0.012);
+    // chin tuft hanging under the mouth
+    patch(0, -0.4, 0.11, 0.075, F - 0.015);
   }
   limbBands(col: number) {
     for (const a of ["armL", "armR"] as const) {
@@ -1181,7 +1240,7 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   const recipe = recipeFor(def.id);
   NO_EARS = false;
   const { paints } = recipe;
-  const buildGeo = (shapes: Shape[], rigid: "arms" | "head" | null) => {
+  const buildGeo = (shapes: Shape[], rigid: "arms" | "head" | null, contact: Shape[] = []) => {
   const figure = isSculptedShape();
   const grooves: Shape[] = [];
   if (figure && !rigid) {
@@ -1320,6 +1379,16 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
     for (let q = 1; q < 6; q++) if (partD[q] < partD[dom]) dom = q;
     applyPaints(paints, x, y, z, col, dom);
     const ao = THREE.MathUtils.clamp(sdf(x + nx * 0.06, y + ny * 0.06, z + nz * 0.06) / 0.06, 0.5, 1);
+    if (recipe.rawColors && contact.length) {
+      // The exported sculpt is shaded with baked ambient occlusion, so the arm
+      // sits in a soft crevice against the flank. Our arm is a separate rigid
+      // piece with no baked AO, which is why the two surfaces used to melt into
+      // one blob. Darkening the vertices that are a few millimetres away from
+      // the neighbouring part recreates that crease.
+      const cd = sceneDist(contact, x, y, z);
+      const k = 1 - THREE.MathUtils.smoothstep(cd, 0.002, 0.042);
+      col.multiplyScalar(1 - 0.26 * k);
+    }
     if (recipe.rawColors) {
       // The exported cat bakes its palette (THREE.Color, i.e. linear values)
       // straight into the vertex colours and multiplies them by 0.5 + 0.5 * ao.
@@ -1438,8 +1507,9 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   neckSplit.c = Math.max(pivotY + 0.03, (pivotY + chinY) / 2);
   const sunk = chinY < pivotY + 0.06;
   neckSplit.b = Math.min(0.13, Math.max(sunk ? 0.11 : 0.06, (chinY - pivotY) / 2 + 0.03));
-  const geometry = buildGeo(recipe.shapes, null);
-  const armGeometry = buildGeo(recipe.arms, "arms");
+  const assetMode = getShapeMode() === "asset";
+  const geometry = buildGeo(recipe.shapes, null, assetMode ? recipe.arms : []);
+  const armGeometry = buildGeo(recipe.arms, "arms", assetMode ? recipe.shapes.filter((sh) => sh.part === PI.torso) : []);
 
   const asset: Asset = { bindPos: bindPos.map((v) => v.clone()), bindQuat: bindQuat.map((q) => q.clone()), geometry, armGeometry, boneInverses: bindMat.map((m) => m.clone().invert()), recipe };
   pruneOldAssets(cacheKey);

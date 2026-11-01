@@ -26,7 +26,7 @@ export interface Tuning {
 
 // Default look = the values chosen by the player in the shape editor.
 export const TUNING_DEFAULTS: Tuning = {
-  head: 0.74,
+  head: 0.745,
   neck: 0.105,
   eyeSize: 1.16,
   eyeX: 1.17,
@@ -100,7 +100,7 @@ function loadShapeMode(): ShapeMode {
  */
 export const ASSET_TUNING: Tuning = {
   ...TUNING_DEFAULTS,
-  head: 0.69,
+  head: 0.85,
   neck: 0.14,
   jaw: 0.82,
   ear: 1.08,
@@ -108,8 +108,8 @@ export const ASSET_TUNING: Tuning = {
   // exported sculpt the flank has to sit ~10% inside, otherwise the hanging
   // arms merge into the body silhouette and the mitten reads as a white blob
   // stuck on the belly instead of a paw beside it.
-  bodyTop: 0.53,
-  bodyBottom: 0.70,
+  bodyTop: 0.58,
+  bodyBottom: 0.76,
   belly: 0.72,
   armRoot: 1.4,
   armTip: 0.85,

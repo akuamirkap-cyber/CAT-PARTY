@@ -7,7 +7,7 @@ export type V3 = [number, number, number];
 
 export const LIMB_TOP: V3 = [0, 0.15, 0]; // joint pivot in limb frame
 /** extra shoulder width of the asset cat (its arms hang clear of the belly) */
-export const ASSET_SHOULDER = 0.07;
+export const ASSET_SHOULDER = 0.05;
 /** foot contact point in leg-local space (moves with the leg length) */
 export let FOOT: V3 = [0, -0.2, 0];
 export let LEG_H = 1;
@@ -63,7 +63,7 @@ export interface Ell {
   r: V3;
 }
 /** lateral slimness of the asset barrel relative to the same slider values */
-export const ASSET_SLIM = 0.93;
+export const ASSET_SLIM = 1.0;
 /** ellipsoids of the torso (torso frame) and head (head frame), from the current proportions */
 export function selfVolumes(t: Tuning = getRigTuning()) {
   const h = t.bodyH, bb = t.bodyBottom, bt = t.bodyTop, fat = t.belly;
