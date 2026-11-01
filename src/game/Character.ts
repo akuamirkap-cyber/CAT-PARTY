@@ -1389,7 +1389,9 @@ export class Character {
       if (this.weapon) {
         // both paws on the handle (right paw on top)
         const g = this.batGrip, d = this.batDir;
-        const up2 = arm === "armR" ? 0.13 : 0.0;
+        // Split grip: the right paw sits lower on the handle so the two arms
+        // never fold into one blob in front of the belly.
+        const up2 = arm === "armR" ? -0.17 : 0.05;
         tx = g.x + d.x * up2;
         ty = g.y + d.y * up2;
         tz = g.z + d.z * up2;
@@ -1766,7 +1768,7 @@ export class Character {
     this.hitSet.add(other);
     const running = this.input.run && Math.hypot(this.torso.velocity.x, this.torso.velocity.z) > 4.5;
     const dmg = (running ? 42 : 38) * (body === other.head ? 1.3 : 1);
-    other.receiveHit(this, dmg, direction, running ? 13.6 : 12.5, body, point, "punch");
+    other.receiveHit(this, dmg, direction, running ? 15.7 : 14.4, body, point, "punch");
     other.squashV -= 4;
     this.hooks.onHit(this, other, point, dmg, "punch");
   }
@@ -1829,13 +1831,15 @@ export class Character {
     this.lastHitTime = this.time;
     if (point) {
       const strongerStrike = kind === "punch" || kind === "bat";
-      let horizontal = strongerStrike ? clamp(force * 0.32, 0, 4.4) : clamp(force * 0.24, 0, 3.2);
+      // A landed blow has to read as a blow: the old 4.4 cap flattened a fist
+      // and a bat into the exact same shove.
+      let horizontal = strongerStrike ? clamp(force * 0.40, 0, 6.2) : clamp(force * 0.26, 0, 3.4);
       if (strongerStrike) {
         // Don't keep adding energy to a victim already flying away quickly.
         const outgoing = this.torso.velocity.x * dir.x + this.torso.velocity.z * dir.z;
-        horizontal = Math.min(horizontal, Math.max(0, 7 - outgoing));
+        horizontal = Math.min(horizontal, Math.max(0, 7.6 - outgoing));
       }
-      let up = clamp(force * 0.10, 0, 1.3);
+      let up = clamp(force * 0.11, 0, 1.5);
       if (strongerStrike) up = Math.min(up, Math.max(0, 4 - this.torso.velocity.y));
       for (const part of this.parts) {
         part.velocity.x += dir.x * horizontal;
@@ -1880,7 +1884,12 @@ export class Character {
     this.dizzy += dmg;
     this.stagger = Math.max(this.stagger, 0.3 + dmg / 90);
     if (this.dizzy >= 100) this.knockOut(4.2);
-    else if (kind === "punch") this.knockDown(0.9);
+    // Every melee hit floors the victim: a swing that only nudged them was the
+    // main reason the bat/pan felt like it did nothing. A bat keeps them down a
+    // touch longer, a punch stays exactly as strong as a bat blow.
+    else if (kind === "punch") this.knockDown(1.0);
+    else if (kind === "bat") this.knockDown(1.1);
+    else if (kind === "pan") this.knockDown(1.0);
   }
 
   /** A short physical fall is not a scoring KO; recover automatically. */
@@ -1950,7 +1959,10 @@ export class Character {
     const ce = Math.cos(this.batEl);
     v3.set(-Math.sin(this.batTh) * ce, Math.sin(this.batEl), Math.cos(this.batTh) * ce);
     t.quaternion.vmult(v3, this.batDir);
-    v3.set(this.swingTimer > 0 ? -0.04 : -0.1, rig.SHOULDER_L[1] * 0.4 + lift, 0.28 + fw);
+    // The handle is held out to the cat's left and a little lower, so the two
+    // paws sit on the same side of the belly. A grip on the centre line folded
+    // both mittens across the chest, which read as tangled arms at rest.
+    v3.set(this.swingTimer > 0 ? 0.02 : 0.2, rig.SHOULDER_L[1] * 0.4 - 0.06 + lift, 0.24 + fw);
     rig.pushOut(v3, this.pawR + 0.02, this.vols.torso);
     t.pointToWorldFrame(v3, this.batGrip);
     const g = this.batGrip, d = this.batDir;
@@ -2027,7 +2039,7 @@ export class Character {
         }
         const kd = _kd.set(kx, 0, kz);
         const power = clamp(impactSpeed / 12, 0.8, 1.1);
-        const damage = pan ? 26 : 38;
+        const damage = pan ? 32 : 38;
         // Apply one coherent impulse to the ragdoll, with a smaller localized
         // impulse at the actual contacted sphere for natural rotation.
         // Use the closest point on the current weapon as a contact estimate.
@@ -2044,9 +2056,11 @@ export class Character {
         _attackCenter.vadd(_meleeOffset, _attackPoint);
         if (!this.meleePathClear(this.batGrip, _attackPoint, c)) continue;
         this.hitSet.add(c);
-        c.receiveHit(this, damage, kd, (pan ? 7.5 : 12.5) * power, body, _attackPoint, pan ? "pan" : "bat");
+        // A weapon blow has to land harder than a paw: the pan used to be the
+        // weakest hit in the game, which is what made it feel like a soft tap.
+        c.receiveHit(this, damage, kd, (pan ? 13.5 : 15.5) * power, body, _attackPoint, pan ? "pan" : "bat");
         c.knockAccessory(kd);
-        c.squashV -= pan ? 5 : 6;
+        c.squashV -= pan ? 6.5 : 8;
         this.hooks.onHit(this, c, _sock.copy(_attackPoint), damage, pan ? "pan" : "bat");
         break;
       }
@@ -2106,8 +2120,8 @@ export class Character {
     // Keep the same hang the menu shows: the asset cat's mittens face forward
     // with the elbow bow out to the side, not spun 90 degrees.
     if (getShapeMode() === "asset") {
-      stabilizeArmRotation(this.armL, this.torso, h, bowTarget(this.torso, 1, ARM_BOW_TWIST, _bowL));
-      stabilizeArmRotation(this.armR, this.torso, h, bowTarget(this.torso, -1, ARM_BOW_TWIST, _bowR));
+      stabilizeArmRotation(this.armL, this.torso, h, bowTarget(this.torso, ARM_BOW_TWIST, _bowL));
+      stabilizeArmRotation(this.armR, this.torso, h, bowTarget(this.torso, -ARM_BOW_TWIST, _bowR));
     } else {
       stabilizeArmRotation(this.armL, this.torso, h);
       stabilizeArmRotation(this.armR, this.torso, h);

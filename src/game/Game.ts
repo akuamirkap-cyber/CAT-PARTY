@@ -340,10 +340,13 @@ export class Game {
       const pan = kind === "pan";
       const effect = impactEffect(kind);
       this.burst(point.x, point.y, point.z, effect.count, effect.color, effect.size, effect.speed);
+      // A weapon blow gets a second, faster puff: one cloud reads as a tap, a
+      // burst reads as a hit. Keeps the white bat smoke, just punchier.
+      if (big) this.burst(point.x, point.y, point.z, 8, effect.color, effect.size * 0.62, 2.2, 0.55);
       if (pan) sfx.pan();
       else if (big) sfx.bigHit();
       else sfx.hit(Math.min(1.2, dmg / 15));
-      if (attacker.isHuman || victim.isHuman) this.shake = Math.max(this.shake, kind === "bat" ? 0.5 : pan ? 0.26 : big ? 0.35 : 0.22);
+      if (attacker.isHuman || victim.isHuman) this.shake = Math.max(this.shake, kind === "bat" ? 0.64 : pan ? 0.42 : big ? 0.4 : 0.26);
     },
     onKO: (victim) => {
       this.pushFeed(`${victim.def.emoji} ${victim.name} pingsan! 💫`);

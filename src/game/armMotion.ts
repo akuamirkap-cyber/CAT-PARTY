@@ -29,10 +29,14 @@ export const ARM_BOW_TWIST = 0.33;
  * to the side of the torso, tilted `twist` radians towards the front.
  * `side` is +1 for the left arm and -1 for the right one.
  */
-export function bowTarget(torso: CANNON.Body, side: number, twist: number, out: CANNON.Vec3) {
+export function bowTarget(torso: CANNON.Body, twist: number, out: CANNON.Vec3) {
+  // Both arm bind frames share +X (the mesh mirrors the geometry, not the
+  // frame), so *both* bows point along the torso's +X. Only the forward tilt is
+  // mirrored — asking the right arm for -X made the stabiliser fight its own
+  // geometry and left that arm rolled tens of degrees away from the menu pose.
   torso.quaternion.vmult(X, sideX);
   torso.quaternion.vmult(Z, fwdZ);
-  const c = Math.cos(twist) * side;
+  const c = Math.cos(twist);
   const s = Math.sin(twist);
   out.set(sideX.x * c + fwdZ.x * s, sideX.y * c + fwdZ.y * s, sideX.z * c + fwdZ.z * s);
   out.normalize();
@@ -66,7 +70,7 @@ export function stabilizeArmRotation(arm: CANNON.Body, torso: CANNON.Body, dt: n
       current.scale(1 / clen, current);
       current.cross(ref, cross);
       const error = Math.atan2(axis.dot(cross), clamp(current.dot(ref), -1, 1));
-      goal = clamp(error * 3, -2.5, 2.5);
+      goal = clamp(error * 4, -3.2, 3.2);
     }
   } else {
     arm.quaternion.vmult(Z, front);
@@ -83,12 +87,12 @@ export function stabilizeArmRotation(arm: CANNON.Body, torso: CANNON.Body, dt: n
       if (front.dot(ref) < 0) ref.negate(ref);
       front.cross(ref, cross);
       const error = Math.atan2(axis.dot(cross), clamp(front.dot(ref), -1, 1));
-      goal = clamp(error * 3, -2.5, 2.5);
+      goal = clamp(error * 4, -3.2, 3.2);
     }
   }
   arm.angularVelocity.vsub(torso.angularVelocity, rel);
   const twist = rel.dot(axis);
-  const change = (goal - twist) * (1 - Math.exp(-10 * Math.max(0, dt)));
+  const change = (goal - twist) * (1 - Math.exp(-16 * Math.max(0, dt)));
   arm.angularVelocity.x += axis.x * change;
   arm.angularVelocity.y += axis.y * change;
   arm.angularVelocity.z += axis.z * change;
@@ -96,8 +100,8 @@ export function stabilizeArmRotation(arm: CANNON.Body, torso: CANNON.Body, dt: n
   // multi-revolution spins, without suppressing the torso's own rotation.
   arm.angularVelocity.vsub(torso.angularVelocity, rel);
   const speed = rel.length();
-  if (speed > 12) {
-    rel.scale(12 / speed, rel);
+  if (speed > 9) {
+    rel.scale(9 / speed, rel);
     torso.angularVelocity.vadd(rel, arm.angularVelocity);
   }
 }
