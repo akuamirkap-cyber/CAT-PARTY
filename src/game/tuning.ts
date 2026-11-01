@@ -105,7 +105,9 @@ export const ASSET_TUNING: Tuning = {
   jaw: 0.82,
   ear: 1.08,
   bodyTop: 0.58,
-  bodyBottom: 0.82,
+  // The asset's barrel is slimmer than the plush pear; a narrower hip is also
+  // what lets the hanging arms sit beside the belly instead of inside it.
+  bodyBottom: 0.75,
   belly: 0.75,
   armRoot: 1.4,
   armTip: 0.85,

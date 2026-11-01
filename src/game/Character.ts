@@ -274,7 +274,9 @@ export class Character {
   pupY = 0;
   // self collision
   vols = rig.selfVolumes();
-  armPts: { y: number; r: number }[] = [];
+  // arm-local collision probes: y along the arm, r the radius, x the baked
+  // outward bow of the sculpted arm (mirrored per side).
+  armPts: { y: number; r: number; x: number }[] = [];
   pawR = 0.09;
   // accessories
   accKind: AccessoryId = "none";
@@ -329,8 +331,10 @@ export class Character {
       // paw, forearm and (thinner) upper part of the arm, in arm-local space
       // only points that can always be resolved (the shoulder ball itself is meant to sit inside the body)
       this.armPts = [
-        { y: AYf(-0.205), r: this.pawR },
-        { y: AYf(-0.11), r: 0.075 * tu.armRoot * 0.7 },
+        { y: AYf(-0.205), r: this.pawR, x: 0 },
+        { y: AYf(-0.11), r: 0.075 * tu.armRoot * 0.7, x: 0 },
+        // the elbow sits on the baked outward bow of the asset arm
+        { y: AYf(-0.07), r: 0.072 * tu.armRoot * 0.7, x: 0.19 },
       ];
     }
     this.buildBodies(spawn, yaw);
@@ -749,9 +753,9 @@ export class Character {
   private selfCollide() {
     if (this.removed) return;
     const t = this.torso, hd = this.head;
-    for (const arm of [this.armL, this.armR]) {
+    for (const [arm, sgn] of [[this.armL, 1], [this.armR, -1]] as const) {
       for (const ap of this.armPts) {
-        _sp.set(0, ap.y, 0.01);
+        _sp.set(ap.x * sgn, ap.y, 0.01);
         const wp = arm.pointToWorldFrame(_sp, _sw);
         _corr.set(0, 0, 0);
         for (const [body, vols] of [
@@ -1487,11 +1491,15 @@ export class Character {
         // relaxed arms hanging a bit out (no T-pose); running = cute alternating pumps
         const ph = this.walkPhase + (s > 0 ? 0 : Math.PI);
         const run = clamp((hSpeed - 2.5) / 3, 0, 1);
-        const swing = -Math.sin(ph) * (0.2 + 0.22 * run) * moveAmt;
+        const swing = -Math.sin(ph) * (0.2 + 0.22 * run) * moveAmt * (getShapeMode() === "asset" ? 0.8 : 1);
         const breathe = Math.sin(this.time * 2.4 + s) * 0.018;
-        const out = 0.17 + 0.03 * run;
-        tx += side.x * s * out + f.x * (0.05 + swing);
-        tz += side.z * s * out + f.z * (0.05 + swing);
+        // The asset-shaped cat has a wide barrel, so a relaxed paw has to hang a
+        // little further out (and less far forward) than the plush default,
+        // otherwise the arm slides inside the belly.
+        const out = (getShapeMode() === "asset" ? 0.14 : 0.17) + 0.03 * run;
+        const fwd = getShapeMode() === "asset" ? 0.02 : 0.05;
+        tx += side.x * s * out + f.x * (fwd + swing);
+        tz += side.z * s * out + f.z * (fwd + swing);
         ty += -0.33 + breathe + run * (0.1 + Math.max(0, swing) * 0.55);
         kp = 200 + run * 140;
       }

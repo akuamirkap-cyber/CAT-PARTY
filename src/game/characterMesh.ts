@@ -85,11 +85,11 @@ const PAW = () => AY(-0.205);
  */
 export const ASSET_LIMB = {
   /** outward bow of the hanging arm (asset arms clear the belly) */
-  bow: 0.16,
+  bow: 0.17,
   /** arm tube radius multiplier (asset: tube 0.075 vs mitten 0.087) */
   armR: 0.94,
   /** paw radius multiplier */
-  pawR: 1.15,
+  pawR: 1.0,
   /** shin radius multiplier */
   thighR: 1.06,
   /** how much the shin narrows at the ankle (1 = no taper) */
@@ -103,7 +103,7 @@ export const ASSET_LIMB = {
   /** softness of the ankle -> paw transition (bigger = smoother boot) */
   footBlend: 0.085,
   /** how wide the hanging arms sit in the idle pose (asset arms hang close) */
-  armSpread: 0.10,
+  armSpread: 0.16,
 };
 /** baked cavity shading of the asset look: min + range * ao (raw sRGB space) */
 export const ASSET_SHADE = { min: 0.5, range: 0.5 };
@@ -465,14 +465,17 @@ class Cat {
         const bow = ARM_BOW() * (a === "armL" ? 1 : -1);
         const rTop = 0.066 * kA;
         const rWrist = 0.0675 * kA;
-        // The asset's arm swells out at the elbow and hangs back in a little at
-        // the wrist, so the mitten lands almost under the shoulder.
-        const upper = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [bow * 0.78, AY(-0.085), 0.004]),
-          rTop * 0.99, rTop, 0.03);
-        const fore = cone(a, B(a, [bow * 0.78, AY(-0.085), 0.004]), B(a, [bow * 0.82, AY(-0.175), 0.014]),
-          rTop, rWrist, 0.02);
+        // Asset curve: the arm leaves the shoulder, bows out at the elbow and
+        // then hangs back in, so the forearm leans against the belly while the
+        // mitten ends up almost under the shoulder. The visible "lekuk" comes
+        // from this baked S-shape, because the bone only sets the overall
+        // shoulder -> paw direction.
+        const upper = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [bow * 0.96, AY(-0.07), 0.004]),
+          rTop * 0.99, rTop * 1.04, 0.035);
+        const fore = cone(a, B(a, [bow * 0.96, AY(-0.07), 0.004]), B(a, [bow * 0.62, AY(-0.175), 0.016]),
+          rTop * 1.04, rWrist, 0.02);
         const pawR = 0.076 * kA * ASSET_LIMB.pawR;
-        const paw = ell(a, B(a, [bow * 0.86, PAW(), 0.014]), [pawR, pawR * 0.99, pawR * 1.03], 0.03);
+        const paw = ell(a, B(a, [bow * 0.58, PAW(), 0.016]), [pawR, pawR * 0.99, pawR * 1.03], 0.03);
         for (const sh of [upper, fore, paw]) sh.col.setHex(this.fur);
         this.arms.push(upper, fore, paw);
       } else {
