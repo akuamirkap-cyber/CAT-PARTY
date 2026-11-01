@@ -86,24 +86,24 @@ const PAW = () => AY(-0.205);
 export const ASSET_LIMB = {
   /** outward bow of the hanging arm (asset arms clear the belly) */
   bow: 0.16,
-  /** arm tube radius multiplier */
-  armR: 1.05,
+  /** arm tube radius multiplier (asset: tube 0.075 vs mitten 0.087) */
+  armR: 0.94,
   /** paw radius multiplier */
-  pawR: 0.92,
+  pawR: 1.15,
   /** shin radius multiplier */
   thighR: 1.06,
   /** how much the shin narrows at the ankle (1 = no taper) */
   ankle: 0.82,
   /** foot half-width / half-depth / half-height multipliers */
-  footW: 0.95,
-  footD: 1.25,
-  footH: 1.15,
+  footW: 1.05,
+  footD: 1.02,
+  footH: 0.95,
   /** forward offset of the foot (the paw points at the camera) */
-  footFwd: 0.085,
+  footFwd: 0.055,
   /** softness of the ankle -> paw transition (bigger = smoother boot) */
   footBlend: 0.085,
   /** how wide the hanging arms sit in the idle pose (asset arms hang close) */
-  armSpread: 0.22,
+  armSpread: 0.10,
 };
 /** baked cavity shading of the asset look: min + range * ao (raw sRGB space) */
 export const ASSET_SHADE = { min: 0.5, range: 0.5 };
@@ -113,6 +113,12 @@ const FOOT_FWD = () => ASSET_LIMB.footFwd;
 const LY = (y: number) => rig.LIMB_TOP[1] + (y - rig.LIMB_TOP[1]) * TU.legH;
 /** Keep the existing sock and toe markings attached to the reshaped feet. */
 const figureFootOffset = () => isSculptedShape() ? 0.1 * (0.7 + 0.3 * TU.legTip) * 0.22 + 0.035 : 0;
+/**
+ * Centre of the sculpted paw. It sits low enough for the ground plane to cut a
+ * flat sole (the asset's foot is deepest right at the floor and tapers up),
+ * instead of leaving a ball floating at the end of the shin.
+ */
+const footCenterY = () => LY(-0.25) - figureFootOffset() + 0.052 * ASSET_LIMB.footH - 0.078;
 
 /** head-local point -> bind space */
 const hd = (x: number, y: number, z: number): V3 => [x * HS, y * HS + HO, z * HS];
@@ -459,12 +465,14 @@ class Cat {
         const bow = ARM_BOW() * (a === "armL" ? 1 : -1);
         const rTop = 0.066 * kA;
         const rWrist = 0.0675 * kA;
-        const upper = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [bow * 0.55, AY(-0.075), 0.004]),
+        // The asset's arm swells out at the elbow and hangs back in a little at
+        // the wrist, so the mitten lands almost under the shoulder.
+        const upper = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [bow * 0.78, AY(-0.085), 0.004]),
           rTop * 0.99, rTop, 0.03);
-        const fore = cone(a, B(a, [bow * 0.55, AY(-0.075), 0.004]), B(a, [bow, AY(-0.175), 0.014]),
+        const fore = cone(a, B(a, [bow * 0.78, AY(-0.085), 0.004]), B(a, [bow * 0.82, AY(-0.175), 0.014]),
           rTop, rWrist, 0.02);
         const pawR = 0.076 * kA * ASSET_LIMB.pawR;
-        const paw = ell(a, B(a, [bow * 0.9, PAW(), 0.014]), [pawR, pawR * 0.99, pawR * 1.03], 0.03);
+        const paw = ell(a, B(a, [bow * 0.86, PAW(), 0.014]), [pawR, pawR * 0.99, pawR * 1.03], 0.03);
         for (const sh of [upper, fore, paw]) sh.col.setHex(this.fur);
         this.arms.push(upper, fore, paw);
       } else {
@@ -512,7 +520,7 @@ class Cat {
         // ankle crease visible.
         // Smooth plump paw that melts into the shin (the ground cut flattens the
         // sole), so the leg reads as one soft boot like the asset's.
-        this.add(ell(l, B(l, [0, footY + 0.052 * ASSET_LIMB.footH - 0.03, FOOT_FWD()]), [
+        this.add(ell(l, B(l, [0, footCenterY(), FOOT_FWD()]), [
           0.156 * lt * ASSET_LIMB.footW,
           0.125 * lt * ASSET_LIMB.footH,
           0.212 * lt * ASSET_LIMB.footD,
@@ -657,12 +665,18 @@ class Cat {
         );
       }
     }
-    // ── three stripes running down the back of the head ──
-    for (const a of [-30, 0, 30]) {
-      this.stroke(
-        [this.headAt(180 + a, -0.1), this.headAt(180 + a, 0.1), this.headAt(180 + a, 0.3)],
-        0.017, 0.012, stripe, soft,
-      );
+    // ── three wide bands wrapping the back of the head ──
+    // The asset pins these at fixed angles around the head (φ -1.12 / -1.52 /
+    // -1.92), so they read as three horizontal stripes from behind and fade out
+    // towards the cheeks.
+    for (const [phi, w] of [[-1.12, 0.03], [-1.52, 0.034], [-1.92, 0.03]] as const) {
+      const y = 0.5 * Math.cos(phi) + 0.045;
+      const pts: V3[] = [];
+      for (let i = 0; i <= 10; i++) {
+        const a = 180 + -56 + (112 * i) / 10;
+        pts.push(this.headAt(a, y - 0.02 * Math.cos((Math.PI * i) / 10)));
+      }
+      this.stroke(pts, w, w * 1.15, stripe, soft);
     }
     // ── torso: five rings over the flanks + one stripe down the spine ──
     // asset y -> body rest space (anchored on the white belly patch)
@@ -709,8 +723,8 @@ class Cat {
       this.paint(slab(B(a, [mx, cut - 0.16, 0.014]), Bdir(a, [0, 1, 0]), 0.16, 0.3), white, 0.008);
     }
     for (const l of ["legL", "legR"] as const) {
-      const cut = -0.134;
-      this.paint(slab(B(l, [0, cut - 0.2, 0.02]), [0, 1, 0], 0.2, 0.3), white, 0.01);
+      const cut = footCenterY() + 0.18;
+      this.paint(slab(B(l, [0, cut - 0.22, 0.02]), [0, 1, 0], 0.22, 0.3), white, 0.01);
     }
     this.toes(new THREE.Color(white).multiplyScalar(0.8).lerp(new THREE.Color(0xd8b6a6), 0.3).getHex());
   }
@@ -1145,7 +1159,7 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
     const lt = TU.legTip, footY = LY(-0.25) - figureFootOffset();
     for (const leg of ["legL", "legR"] as const) {
       for (const x of [-0.062, 0.062]) {
-        grooves.push(ell(leg, B(leg, [x * lt, footY - 0.012, FOOT_FWD() + 0.238 * lt * ASSET_LIMB.footD]), [0.015, 0.04, 0.024]));
+        grooves.push(ell(leg, B(leg, [x * lt, footCenterY() - 0.016, FOOT_FWD() + 0.238 * lt * ASSET_LIMB.footD]), [0.016, 0.045, 0.026]));
       }
     }
   }
