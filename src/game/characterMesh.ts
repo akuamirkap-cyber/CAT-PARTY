@@ -860,7 +860,7 @@ class Cat {
       // the floor; ours sat at 0.135, which left too little orange shin below
       // the belly stripes.
       const cut = footCenterY() + 0.135;
-      this.paint(slab(B(l, [0, cut - 0.235, 0.02]), [0, 1, 0], 0.235, 0.3), white, 0.01);
+      this.paint(slab(B(l, [0, cut - 0.235, 0.02]), [0, 1, 0], 0.235, 0.3), white, 0.005);
       // Ragged cuff: the sculpt masks the sock with `y < 0.25 + noise`, so its
       // edge wanders around the leg instead of cutting a clean ring. A ring of
       // soft blobs gives the same torn fur line.
@@ -871,7 +871,7 @@ class Cat {
         this.paint(
           ell("torso", B(l, [Math.sin(a) * R, cut - 0.016 + jy, Math.cos(a) * R + 0.02]),
             [0.038, 0.024, 0.038]),
-          white, 0.008,
+          white, 0.005,
         );
       }
     }
