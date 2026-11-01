@@ -469,9 +469,9 @@ body,
 /* ============================================================
    Transisi halaman: dua panel miring menyapu layar.
    ============================================================ */
-.wipe { position: fixed; inset: 0; z-index: 90; overflow: hidden; pointer-events: none; visibility: hidden; font-family: "Lilita One", "Nunito", sans-serif; }
-.wipe.is-active { visibility: visible; }
-.wipe-panel { position: absolute; top: -15vh; left: 0; width: 220vw; height: 130vh; transform: translate3d(140vw, 0, 0) skewX(-18deg); will-change: transform; }
+.wipe { position: fixed; inset: 0; z-index: 200; overflow: hidden; pointer-events: none; visibility: hidden; font-family: "Lilita One", "Nunito", sans-serif; }
+.wipe.is-active { visibility: visible; pointer-events: auto; }
+.wipe-panel { position: absolute; top: -15vh; left: 0; width: 220vw; height: 130vh; transform: translate3d(140vw, 0, 0) skewX(-18deg); will-change: transform; backface-visibility: hidden; }
 .wipe-panel-edge { background: var(--wipe-deep, #e57f00); }
 .wipe-panel-main { background: var(--wipe-main, #ffa412); }
 .wipe-badge { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #fff; }
@@ -537,7 +537,3 @@ body,
   .ml-picker strong { font-size: 20px; }
   .ml-hint { display: none; }
 }
-
-/* frozen snapshot of the screen we are leaving, under the wipe panels */
-.wipe-shot { position: absolute; inset: 0; background-size: cover; background-position: center; background-color: #ffa412; opacity: 0; will-change: transform, filter; }
-.wipe-shot.is-visible { opacity: 1; }

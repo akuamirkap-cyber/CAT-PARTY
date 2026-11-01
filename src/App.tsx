@@ -42,6 +42,11 @@ export default function App() {
   }, [camMode, camZoom]);
   const isTouchDevice = useMemo(() => typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0), []);
   const [showTouch, setShowTouch] = useState(isTouchDevice);
+  // Page sweep: on by default (it is part of the menu look), calm fade optional.
+  const [wipeMode, setWipeMode] = useState<"full" | "calm">(() => (localStorage.getItem("mb.wipeMode") === "calm" ? "calm" : "full"));
+  useEffect(() => {
+    localStorage.setItem("mb.wipeMode", wipeMode);
+  }, [wipeMode]);
   const [gameKey, setGameKey] = useState(0);
   const [sheet, setSheet] = useState<SheetId>(null);
 
@@ -144,7 +149,7 @@ export default function App() {
         </>
       )}
       {/* the page wipe stays mounted so it can cover the screen swap */}
-      <ScreenWipe handleRef={wipe} />
+      <ScreenWipe handleRef={wipe} mode={wipeMode} />
       {/* ---------- sheets ---------- */}
       {sheet === "char" && (
         <Sheet title="Pilih Kucing" icon={<CatIcon />} onClose={() => setSheet(null)} footer={<JuicyButton tone="yellow" size="lg" block onClick={() => setSheet(null)}>PILIH {sel.name.toUpperCase()}</JuicyButton>}>
@@ -307,6 +312,13 @@ export default function App() {
                 </div>
               </div>
             )}
+            <div className="flex items-center justify-between rounded-2xl bg-white p-3 shadow-[0_3px_0_rgba(0,0,0,.1)]">
+              <div>
+                <div className="text-sm font-black text-[#24364f]">🎬 Animasi Ganti Halaman</div>
+                <div className="text-[11px] font-bold text-slate-500">Panel menyapu layar + badge halaman</div>
+              </div>
+              <Toggle on={wipeMode === "full"} tone="blue" onClick={() => setWipeMode(wipeMode === "full" ? "calm" : "full")} />
+            </div>
             <div className="flex items-center justify-between rounded-2xl bg-white p-3 shadow-[0_3px_0_rgba(0,0,0,.1)]">
               <div>
                 <div className="text-sm font-black text-[#24364f]">📱 Kontrol Sentuh</div>
