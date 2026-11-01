@@ -691,9 +691,9 @@ class Cat {
           // Deep in z so the paw surface always passes through the shape, thin
           // in x and tall in y: the trace on the paw is one clean crease.
           this.paint(
-            ell("torso", B(l, [LEG_OUT() + dx * lt, footCenterY() + 0.26 * footRY(), FOOT_FWD()]),
-              [0.0085, 0.075, 0.2]),
-            col, 0.009,
+            ell("torso", B(l, [LEG_OUT() + dx * lt, footCenterY() + 0.20 * footRY(), FOOT_FWD()]),
+              [0.012, 0.085, 0.2]),
+            col, 0.008,
           );
         } else {
           this.paint(ell("torso", B(l, [dx * lt, LY(-0.31) - figureFootOffset(), 0.2 * lt]), [0.008, 0.02, 0.06]), col, 0.005);
@@ -816,10 +816,13 @@ class Cat {
         this.paint(slab(B(a, [0, armAt(t), 0]), Bdir(a, [0, 1, 0]), 0.019, 0.16), stripe, soft);
       }
     }
-    // ── legs: two rings just above the sock (asset y .475 / .39) ──
+    // ── legs: two rings just above the sock ──
+    // Asset legs carry bands at model y 0.39 / 0.475 and the sock ends at
+    // y ~0.25. Converted to this rig that is two leg-local rings at 0.034 and
+    // -0.028, i.e. right above the cuff with a hair of orange between them.
     for (const l of ["legL", "legR"] as const) {
-      for (const y of [0.05, -0.005]) {
-        this.paint(slab(B(l, [0, y, 0.005]), [0, 1, 0], 0.019, 0.18), stripe, soft);
+      for (const y of [0.034, -0.028]) {
+        this.paint(slab(B(l, [0, y, 0.005]), [0, 1, 0], 0.022, 0.18), stripe, soft);
       }
     }
     this.tailBands(stripe, 4);
@@ -853,12 +856,28 @@ class Cat {
       this.paint(ell(a, B(a, [mx * 0.96, PAW() - 0.012, 0.03]), [pr * 1.15, pr * 1.3, pr * 1.2]), white, 0.011);
     }
     for (const l of ["legL", "legR"] as const) {
-      const cut = footCenterY() + 0.18;
-      this.paint(slab(B(l, [0, cut - 0.22, 0.02]), [0, 1, 0], 0.22, 0.3), white, 0.01);
+      // Asset sock top is model y 0.238-0.268, i.e. ~0.11 of body height above
+      // the floor; ours sat at 0.135, which left too little orange shin below
+      // the belly stripes.
+      const cut = footCenterY() + 0.135;
+      this.paint(slab(B(l, [0, cut - 0.235, 0.02]), [0, 1, 0], 0.235, 0.3), white, 0.01);
+      // Ragged cuff: the sculpt masks the sock with `y < 0.25 + noise`, so its
+      // edge wanders around the leg instead of cutting a clean ring. A ring of
+      // soft blobs gives the same torn fur line.
+      const R = 0.128;
+      for (let i = 0; i < 18; i++) {
+        const a = (i / 18) * Math.PI * 2;
+        const jy = 0.011 * Math.sin(i * 2.31) + 0.009 * Math.cos(i * 4.7);
+        this.paint(
+          ell("torso", B(l, [Math.sin(a) * R, cut - 0.016 + jy, Math.cos(a) * R + 0.02]),
+            [0.038, 0.024, 0.038]),
+          white, 0.008,
+        );
+      }
     }
-    // The sculpt's toe creases read as pale seams catching the light, not as
-        // dark lines: paint them just above the sock white.
-        this.toes(new THREE.Color(white).multiplyScalar(0.78).lerp(new THREE.Color(0xc9bdb0), 0.5).getHex());
+    // The sculpt's toe creases read as pale seams catching the light: paint
+    // them a shade under the sock white so the paw keeps its three toes.
+    this.toes(new THREE.Color(white).multiplyScalar(0.76).lerp(new THREE.Color(0xc0b0a0), 0.5).getHex());
   }
   /** Wide white face patch + chin, exactly the shape the exported cat has. */
   assetMuzzle(col = WHITE) {
