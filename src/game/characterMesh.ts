@@ -77,6 +77,36 @@ let NO_EARS = false;
 const AY = (y: number) => rig.LIMB_TOP[1] + (y - rig.LIMB_TOP[1]) * TU.armLen;
 /** arm-local y of the paw centre */
 const PAW = () => AY(-0.205);
+/**
+ * Proportions of the sculpted (asset-like) limbs. They are traced from the
+ * "accurate 3D cat" export: slim hanging arms that bow slightly outward past
+ * the hips, and thick shins ending in long rounded paws.
+ * Exported so the shape can be tuned against the asset without touching the rig.
+ */
+export const ASSET_LIMB = {
+  /** outward bow of the hanging arm (asset arms clear the belly) */
+  bow: 0.16,
+  /** arm tube radius multiplier */
+  armR: 1.05,
+  /** paw radius multiplier */
+  pawR: 0.92,
+  /** shin radius multiplier */
+  thighR: 1.06,
+  /** how much the shin narrows at the ankle (1 = no taper) */
+  ankle: 0.82,
+  /** foot half-width / half-depth / half-height multipliers */
+  footW: 0.95,
+  footD: 1.25,
+  footH: 1.15,
+  /** forward offset of the foot (the paw points at the camera) */
+  footFwd: 0.085,
+  /** softness of the ankle -> paw transition (bigger = smoother boot) */
+  footBlend: 0.085,
+  /** how wide the hanging arms sit in the idle pose (asset arms hang close) */
+  armSpread: 0.12,
+};
+const ARM_BOW = () => ASSET_LIMB.bow;
+const FOOT_FWD = () => ASSET_LIMB.footFwd;
 /** leg-local y stretched by the leg length tuning (hip pivot fixed) */
 const LY = (y: number) => rig.LIMB_TOP[1] + (y - rig.LIMB_TOP[1]) * TU.legH;
 /** Keep the existing sock and toe markings attached to the reshaped feet. */
@@ -413,15 +443,25 @@ class Cat {
     for (const a of ["armL", "armR"] as const) {
       const figure = isSculptedShape();
       if (figure) {
-        // One continuous tapered capsule avoids the stacked, swollen look of
-        // overlapping shoulder and forearm blobs. The mitten blends softly
-        // into the end; the original fur and palm paints stay in place.
-        const arm = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [0, AY(-0.19), 0]),
-          0.073 * ar, 0.086 * (0.45 * ar + 0.55 * at), 0);
-        const paw = ell(a, B(a, [0, PAW(), 0.01]), [0.104 * at, 0.102 * at, 0.105 * at], 0.025);
-        arm.col.setHex(this.fur);
-        paw.col.setHex(this.fur);
-        this.arms.push(arm, paw);
+        // Asset-style arm: it keeps its thickness all the way down, bows a
+        // touch outward at the elbow and hangs beside the belly, then ends in
+        // a round mitten paw that is a little wider than the wrist — the same
+        // silhouette as the exported 3D cat (no flipper / no bulbous shoulder).
+        // Proportions traced from the asset: slim tube (≈0.10 body-height
+        // across) that widens slightly towards the wrist, ending in a round
+        // mitten that is clearly wider than the wrist.
+        const kA = (0.7 * ar + 0.3 * at) * ASSET_LIMB.armR;
+        const bow = ARM_BOW();
+        const rTop = 0.066 * kA;
+        const rWrist = 0.0675 * kA;
+        const upper = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [bow * 0.55, AY(-0.075), 0.004]),
+          rTop * 0.99, rTop, 0.03);
+        const fore = cone(a, B(a, [bow * 0.55, AY(-0.075), 0.004]), B(a, [bow, AY(-0.175), 0.014]),
+          rTop, rWrist, 0.02);
+        const pawR = 0.076 * kA * ASSET_LIMB.pawR;
+        const paw = ell(a, B(a, [bow * 0.9, PAW(), 0.014]), [pawR, pawR * 0.99, pawR * 1.03], 0.03);
+        for (const sh of [upper, fore, paw]) sh.col.setHex(this.fur);
+        this.arms.push(upper, fore, paw);
       } else {
         const rRoot = 0.088 * ar;
         const ball = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [0, rig.LIMB_TOP[1] - 0.001, 0]), rRoot, rRoot, 0);
@@ -439,16 +479,39 @@ class Cat {
     const lr = T.legRoot, lt = T.legTip;
     for (const l of ["legL", "legR"] as const) {
       const figure = isSculptedShape();
-      this.add(cone(l, B(l, [0, 0.08, 0]), B(l, [0, LY(-0.17), 0.02]), (figure ? 0.18 : 0.14) * lr, (figure ? 0.17 : 0.135) * (0.5 * lr + 0.5 * lt), 0.08));
-      // A wider, flatter foot blends into the leg like the reference figure;
-      // its bottom stays at the same height as the classic foot.
+      if (figure) {
+        // Asset-style leg: a thick, almost cylindrical shin that runs straight
+        // down into a big rounded paw sticking out towards the front — the
+        // exported cat's sturdy legs, instead of a narrow stick + flat slab.
+        // Nearly cylindrical shin: the asset's legs keep their thickness all the
+        // way down, only rounding off at the paw.
+        const kL = (0.6 * lr + 0.4 * lt) * ASSET_LIMB.thighR;
+        this.add(cone(l, B(l, [0, 0.115, 0]), B(l, [0, LY(-0.20), 0.02]),
+          0.148 * kL, 0.145 * kL * ASSET_LIMB.ankle, 0.05));
+      } else {
+        this.add(cone(l, B(l, [0, 0.08, 0]), B(l, [0, LY(-0.17), 0.02]), 0.14 * lr, 0.135 * (0.5 * lr + 0.5 * lt), 0.08));
+      }
+      // A wide foot blends into the leg like the reference figure; its bottom
+      // stays at the same height as the classic foot.
       const footH = 0.1 * (0.7 + 0.3 * lt);
       const figureH = footH * 0.78;
       const footY = LY(-0.25) - (figure ? figureFootOffset() : 0);
       if (figure) {
-        // A shaped paw, not a scaled sphere: broad front, soft corners and a
-        // flat sole, smoothly joined to the leg. Fur paints remain unchanged.
-        this.add(roundBox(l, B(l, [0, footY, 0.06]), [0.187 * lt, figureH, 0.205 * lt], 0.064, 0.07));
+        // Smooth, rounded paw: as wide as the shin and clearly longer than it,
+        // with a soft sole (the ground cut flattens the very bottom).
+        // Same width as the shin, clearly longer than it and taller than a
+        // slab, so it reads as the asset's rounded paw rather than a plate.
+        // Rounded box, not a sphere: the asset's paw has flat-ish inner and
+        // outer sides with a soft sole, so the gap between the legs stays a
+        // clean slit instead of a rounded valley. Low blend value keeps the
+        // ankle crease visible.
+        // Smooth plump paw that melts into the shin (the ground cut flattens the
+        // sole), so the leg reads as one soft boot like the asset's.
+        this.add(ell(l, B(l, [0, footY + 0.052 * ASSET_LIMB.footH - 0.03, FOOT_FWD()]), [
+          0.156 * lt * ASSET_LIMB.footW,
+          0.125 * lt * ASSET_LIMB.footH,
+          0.212 * lt * ASSET_LIMB.footD,
+        ], ASSET_LIMB.footBlend));
       } else {
         this.add(ell(l, B(l, [0, footY, 0.06]), [0.145 * lt, footH, 0.175 * lt], 0.06));
       }
@@ -963,8 +1026,8 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   if (figure && !rigid) {
     const lt = TU.legTip, footY = LY(-0.25) - figureFootOffset();
     for (const leg of ["legL", "legR"] as const) {
-      for (const x of [-0.055, 0.055]) {
-        grooves.push(ell(leg, B(leg, [x * lt, footY - 0.02, 0.06 + 0.205 * lt + 0.008]), [0.014, 0.038, 0.022]));
+      for (const x of [-0.062, 0.062]) {
+        grooves.push(ell(leg, B(leg, [x * lt, footY - 0.012, FOOT_FWD() + 0.238 * lt * ASSET_LIMB.footD]), [0.015, 0.04, 0.024]));
       }
     }
   }
@@ -2552,7 +2615,9 @@ export function poseStatic(v: CharacterVisual, t: number) {
   const sway = Math.sin(t * 1.6) * 0.025;
   // Palms naturally face inwards; their existing markings remain on the palm.
   const palmTurn = isSculptedShape() ? 1.1 : 0;
-  const armSpread = isSculptedShape() ? 0.37 : 0.39;
+  // The asset's arms hang almost straight down beside the belly; the classic
+  // shape keeps its wider, plush-toy spread.
+  const armSpread = getShapeMode() === "asset" ? ASSET_LIMB.armSpread : isSculptedShape() ? 0.37 : 0.39;
   setLimb(v.armL, rig.SHOULDER_L, base, 0.08, armSpread + sway, -palmTurn);
   setLimb(v.armR, rig.SHOULDER_R, base, 0.08, -armSpread - sway, palmTurn);
   setLimb(v.legL, rig.HIP_L, base, 0, 0.04);
