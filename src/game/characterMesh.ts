@@ -85,9 +85,9 @@ const PAW = () => AY(-0.205);
  */
 export const ASSET_LIMB = {
   /** outward bow of the hanging arm (asset arms clear the belly) */
-  bow: 0.17,
+  bow: 0.085,
   /** arm tube radius multiplier (asset: tube 0.075 vs mitten 0.087) */
-  armR: 0.94,
+  armR: 1.0,
   /** paw radius multiplier */
   pawR: 1.0,
   /** shin radius multiplier */
@@ -103,7 +103,7 @@ export const ASSET_LIMB = {
   /** softness of the ankle -> paw transition (bigger = smoother boot) */
   footBlend: 0.085,
   /** how wide the hanging arms sit in the idle pose (asset arms hang close) */
-  armSpread: 0.16,
+  armSpread: 0.05,
 };
 /** baked cavity shading of the asset look: min + range * ao (raw sRGB space) */
 export const ASSET_SHADE = { min: 0.5, range: 0.5 };
@@ -451,33 +451,38 @@ class Cat {
     for (const a of ["armL", "armR"] as const) {
       const figure = isSculptedShape();
       if (figure) {
-        // Asset-style arm: it keeps its thickness all the way down, bows a
-        // touch outward at the elbow and hangs beside the belly, then ends in
-        // a round mitten paw that is a little wider than the wrist — the same
-        // silhouette as the exported 3D cat (no flipper / no bulbous shoulder).
-        // Proportions traced from the asset: slim tube (≈0.10 body-height
-        // across) that widens slightly towards the wrist, ending in a round
-        // mitten that is clearly wider than the wrist.
+        // Asset-style arm: a smooth, almost straight tube that drifts outward
+        // through the elbow and comes back in at the wrist, ending in a round
+        // mitten that melts into the forearm. Every point below is the traced
+        // asset curve (shoulder -> elbow -> wrist) mapped into arm-local units,
+        // so the silhouette matches the exported cat instead of a bent "hook".
         const kA = (0.7 * ar + 0.3 * at) * ASSET_LIMB.armR;
-        // The bind frames of both arms share the same +x direction, so the
-        // outward bow has to be mirrored by hand or one arm bows into the body
-        // while the other swings away from it.
-        const bow = ARM_BOW() * (a === "armL" ? 1 : -1);
-        const rTop = 0.066 * kA;
-        const rWrist = 0.0675 * kA;
-        // Asset curve: the arm leaves the shoulder, bows out at the elbow and
-        // then hangs back in, so the forearm leans against the belly while the
-        // mitten ends up almost under the shoulder. The visible "lekuk" comes
-        // from this baked S-shape, because the bone only sets the overall
-        // shoulder -> paw direction.
-        const upper = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [bow * 0.96, AY(-0.07), 0.004]),
-          rTop * 0.99, rTop * 1.04, 0.035);
-        const fore = cone(a, B(a, [bow * 0.96, AY(-0.07), 0.004]), B(a, [bow * 0.62, AY(-0.175), 0.016]),
-          rTop * 1.04, rWrist, 0.02);
-        const pawR = 0.076 * kA * ASSET_LIMB.pawR;
-        const paw = ell(a, B(a, [bow * 0.58, PAW(), 0.016]), [pawR, pawR * 0.99, pawR * 1.03], 0.03);
-        for (const sh of [upper, fore, paw]) sh.col.setHex(this.fur);
-        this.arms.push(upper, fore, paw);
+        // Both bind frames share +x, so the outward drift is mirrored by hand.
+        const sage = a === "armL" ? 1 : -1;
+        const bow = ARM_BOW() * sage;
+        const rTop = 0.0665 * kA;
+        const chain = [
+          // Bury the top of the tube inside the chest so the shoulder reads as
+          // part of the body instead of a sausage stuck onto the flank.
+          { p: B(a, [-bow * 0.12, AY(0.235), -0.006]), r: rTop * 0.9, cs: 0.05 },
+          { p: B(a, [bow * 0.05, rig.LIMB_TOP[1], 0]), r: rTop * 0.97, cs: 0.04 },
+          { p: B(a, [bow * 0.3, AY(0.075), 0.004]), r: rTop * 1.0, cs: 0.03 },
+          { p: B(a, [bow * 0.58, AY(-0.005), 0.01]), r: rTop * 1.02, cs: 0.03 },
+          { p: B(a, [bow * 0.78, AY(-0.075), 0.014]), r: rTop * 1.03, cs: 0.03 },
+          { p: B(a, [bow * 0.92, AY(-0.14), 0.016]), r: rTop * 1.04, cs: 0.03 },
+          { p: B(a, [bow, AY(-0.185), 0.017]), r: rTop * 1.05, cs: 0.03 },
+        ];
+        for (let i = 0; i < chain.length - 1; i++) {
+          const seg = cone(a, chain[i].p, chain[i + 1].p, chain[i].r, chain[i + 1].r, chain[i + 1].cs);
+          seg.col.setHex(this.fur);
+          this.arms.push(seg);
+        }
+        // The mitten is a soft ball that blends into the wrist (asset k = 0.07)
+        // instead of a separate sphere stuck on the end.
+        const pawR = 0.0765 * kA * ASSET_LIMB.pawR;
+        const paw = ell(a, B(a, [bow * 1.04, PAW() - 0.012, 0.018]), [pawR, pawR * 1.08, pawR * 1.06], 0.05);
+        paw.col.setHex(this.fur);
+        this.arms.push(paw);
       } else {
         const rRoot = 0.088 * ar;
         const ball = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [0, rig.LIMB_TOP[1] - 0.001, 0]), rRoot, rRoot, 0);
@@ -721,9 +726,13 @@ class Cat {
     // ── white mittens and socks: a clean cuff line, like the asset's
     //    "armT > 0.73" / "y < 0.268" colour masks ──
     for (const a of ["armL", "armR"] as const) {
-      const cut = armAt(0.73);
-      const mx = (a === "armL" ? 1 : -1) * ASSET_LIMB.bow * 0.9;
-      this.paint(slab(B(a, [mx, cut - 0.16, 0.014]), Bdir(a, [0, 1, 0]), 0.16, 0.3), white, 0.008);
+      // Only the mitten itself is white (asset: armT > 0.73). A taller cuff
+      // made the whole forearm read as one white blob next to the belly.
+      const mx = (a === "armL" ? 1 : -1) * ASSET_LIMB.bow;
+      const pr = 0.0765 * (0.7 * TU.armRoot + 0.3 * TU.armTip) * ASSET_LIMB.armR * ASSET_LIMB.pawR;
+      // Mask the whole mitten (round bottom) instead of cutting a flat cuff.
+      this.paint(ell(a, B(a, [mx * 1.04, PAW() - 0.006, 0.018]), [pr * 1.14, pr * 1.3, pr * 1.2]), white, 0.009);
+      this.paint(slab(B(a, [mx * 0.95, PAW() + 0.085, 0.018]), Bdir(a, [0, 1, 0]), 0.03, 0.2), white, 0.006);
     }
     for (const l of ["legL", "legR"] as const) {
       const cut = footCenterY() + 0.18;
@@ -1079,6 +1088,23 @@ export const SKIN_MATERIAL = new THREE.MeshPhysicalMaterial({
   sheenColor: new THREE.Color(0xffffff),
 });
 
+/**
+ * Surface for the asset-shaped cats. It copies the 3D preview's material
+ * (low white sheen, a touch of clearcoat) instead of the plush-toy sheen, so
+ * the vertex-coloured fur keeps the asset's saturated orange instead of being
+ * veiled in white.
+ */
+export const SKIN_MATERIAL_ASSET = new THREE.MeshPhysicalMaterial({
+  vertexColors: true,
+  roughness: 0.55,
+  metalness: 0,
+  sheen: 0.26,
+  sheenRoughness: 0.6,
+  sheenColor: new THREE.Color(0xfff3e2),
+  clearcoat: 0.22,
+  clearcoatRoughness: 0.5,
+});
+
 /** Refine only the little tail, leaving the rest of the character mesh (and
  * its frame cost) unchanged. Shared edge midpoints keep the surface watertight. */
 function refineTail(geo: THREE.BufferGeometry, tail: Shape, sdf: (x: number, y: number, z: number) => number) {
@@ -1295,12 +1321,11 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
     applyPaints(paints, x, y, z, col, dom);
     const ao = THREE.MathUtils.clamp(sdf(x + nx * 0.06, y + ny * 0.06, z + nz * 0.06) / 0.06, 0.5, 1);
     if (recipe.rawColors) {
-      // The exported cat feeds its palette (plain sRGB numbers) straight into a
-      // vertex-colour attribute, so the renderer reads them as linear values.
-      // Storing the same numbers here makes the game cat light up exactly like
-      // the 3D preview next to it instead of a darker, browner orange. Its baked
-      // cavity shade is applied in that same raw space, like the asset does.
-      col.convertLinearToSRGB();
+      // The exported cat bakes its palette (THREE.Color, i.e. linear values)
+      // straight into the vertex colours and multiplies them by 0.5 + 0.5 * ao.
+      // Doing exactly the same keeps the game cat the same vivid orange as the
+      // 3D preview — an extra linear->sRGB pass here is what used to bleach the
+      // fur into a pale sand colour.
       col.multiplyScalar(ASSET_SHADE.min + ASSET_SHADE.range * ao);
     } else {
       col.multiplyScalar(0.9 + 0.1 * ao);
@@ -2638,12 +2663,13 @@ export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "n
     return b;
   });
   const skeleton = new THREE.Skeleton(bones, asset.boneInverses.map((m) => m.clone()));
-  const mesh = new THREE.SkinnedMesh(asset.geometry, SKIN_MATERIAL);
+  const skin = getShapeMode() === "asset" ? SKIN_MATERIAL_ASSET : SKIN_MATERIAL;
+  const mesh = new THREE.SkinnedMesh(asset.geometry, skin);
   mesh.bind(skeleton, new THREE.Matrix4());
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.frustumCulled = false;
-  const armMesh = new THREE.SkinnedMesh(asset.armGeometry, SKIN_MATERIAL);
+  const armMesh = new THREE.SkinnedMesh(asset.armGeometry, skin);
   armMesh.bind(skeleton, new THREE.Matrix4());
   armMesh.castShadow = true;
   armMesh.receiveShadow = true;
@@ -2759,7 +2785,10 @@ export function poseStatic(v: CharacterVisual, t: number) {
   // The small shoulder spread keeps the paws clear of the rounded body.
   const sway = Math.sin(t * 1.6) * 0.025;
   // Palms naturally face inwards; their existing markings remain on the palm.
-  const palmTurn = isSculptedShape() ? 1.1 : 0;
+  // The asset cat's mittens face forward, so its arms get only a slight
+  // inward twist; a large twist swings the baked elbow bow forward/back and
+  // makes the hanging arms look broken.
+  const palmTurn = getShapeMode() === "asset" ? 0.32 : isSculptedShape() ? 1.1 : 0;
   // The asset's arms hang almost straight down beside the belly; the classic
   // shape keeps its wider, plush-toy spread.
   const armSpread = getShapeMode() === "asset" ? ASSET_LIMB.armSpread : isSculptedShape() ? 0.37 : 0.39;

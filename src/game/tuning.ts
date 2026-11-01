@@ -104,11 +104,13 @@ export const ASSET_TUNING: Tuning = {
   neck: 0.14,
   jaw: 0.82,
   ear: 1.08,
-  bodyTop: 0.58,
-  // The asset's barrel is slimmer than the plush pear; a narrower hip is also
-  // what lets the hanging arms sit beside the belly instead of inside it.
-  bodyBottom: 0.75,
-  belly: 0.75,
+  // The barrel is noticeably slimmer than the plush pear: measured against the
+  // exported sculpt the flank has to sit ~10% inside, otherwise the hanging
+  // arms merge into the body silhouette and the mitten reads as a white blob
+  // stuck on the belly instead of a paw beside it.
+  bodyTop: 0.53,
+  bodyBottom: 0.70,
+  belly: 0.72,
   armRoot: 1.4,
   armTip: 0.85,
   armLen: 1.0,

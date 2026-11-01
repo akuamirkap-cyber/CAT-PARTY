@@ -58,7 +58,9 @@ export default function LineupPreview({ selected, accessory, eyeStyle, expressio
     const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
     camera.position.set(0, 1.15, 8.6);
     camera.lookAt(0, 0.72, 0);
-    scene.add(new THREE.HemisphereLight(0xf2f8ff, 0xffd2b8, 1.55));
+    // Neutral-warm ambient keeps the orange fur saturated (a cool sky tint
+    // turned it beige next to the asset preview).
+    scene.add(new THREE.HemisphereLight(0xfff4e6, 0xffddc4, 1.5));
     const key = new THREE.DirectionalLight(0xffffff, 2);
     key.position.set(3, 6, 6);
     key.castShadow = true;

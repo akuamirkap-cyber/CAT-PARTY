@@ -681,7 +681,9 @@ export function buildLobbyScenery(scene: THREE.Scene): LobbyScenery {
 
 export function addLobbyLights(scene: THREE.Scene) {
   scene.add(new THREE.AmbientLight(0xfff6e8, 0.5));
-  scene.add(new THREE.HemisphereLight(0xbfe4ff, 0x7fc95a, 1.1));
+  // Warm-white sky fill: a blue hemisphere tint desaturated the fur and made
+  // the orange cats look beige next to their 3D asset preview.
+  scene.add(new THREE.HemisphereLight(0xfff1e0, 0xcfe0a8, 1.1));
   const sun = new THREE.DirectionalLight(0xfff0cf, 3.1);
   sun.position.set(-9, 15, 10);
   sun.castShadow = true;
@@ -693,7 +695,7 @@ export function addLobbyLights(scene: THREE.Scene) {
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.03;
   scene.add(sun);
-  const bounce = new THREE.DirectionalLight(0xbfe0ff, 0.6);
+  const bounce = new THREE.DirectionalLight(0xffeeda, 0.55);
   bounce.position.set(10, 6, -12);
   scene.add(bounce);
 }

@@ -221,7 +221,9 @@ export class Game {
     // sky
     this.scene.background = skyTexture();
     this.scene.fog = new THREE.Fog(0xb8e6ff, 50, 130);
-    this.scene.add(new THREE.HemisphereLight(0xeaf7ff, 0xffd9b0, 1.55));
+    // Warm-white sky fill instead of a blue one: the blue tint used to wash the
+    // orange fur out to beige in the arena.
+    this.scene.add(new THREE.HemisphereLight(0xfff3e4, 0xffd9b0, 1.5));
     const sun = new THREE.DirectionalLight(0xfff0d6, 2.5);
     sun.position.set(9, 20, 8);
     sun.castShadow = true;

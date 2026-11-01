@@ -1,11 +1,13 @@
 // Shared skeleton constants (physics ragdoll + skinned mesh bind pose).
 // All values are in the local frame of the body they belong to.
 // The torso-related ones are LIVE bindings recomputed from the shape tuning by applyRig().
-import { getRigTuning, isSculptedShape, type Tuning } from "./tuning";
+import { getRigTuning, getShapeMode, isSculptedShape, type Tuning } from "./tuning";
 
 export type V3 = [number, number, number];
 
 export const LIMB_TOP: V3 = [0, 0.15, 0]; // joint pivot in limb frame
+/** extra shoulder width of the asset cat (its arms hang clear of the belly) */
+export const ASSET_SHOULDER = 0.07;
 /** foot contact point in leg-local space (moves with the leg length) */
 export let FOOT: V3 = [0, -0.2, 0];
 export let LEG_H = 1;
@@ -31,8 +33,11 @@ export let HIP_R: V3 = [-0.19, -0.38, 0];
 export function applyRig(t: Tuning = getRigTuning()) {
   const h = t.bodyH;
   BODY_H = h;
-  // Keep the socket close to the chest surface, giving the arm room to hang beside the torso.
-  const sw = 0.33 * t.bodyTop * 1.03 + 0.01 + (isSculptedShape() ? 0.015 : 0);
+  // Keep the socket close to the chest surface, giving the arm room to hang
+  // beside the torso. The asset's shoulders sit further out than the plush
+  // ones (measured 0.52 * scale from the centre line), so its arm can hang
+  // clear of the belly instead of sinking into it.
+  const sw = 0.33 * t.bodyTop * 1.03 + 0.01 + (isSculptedShape() ? 0.015 : 0) + (getShapeMode() === "asset" ? ASSET_SHOULDER : 0);
   const hw = 0.19 * (0.6 + 0.4 * t.bodyBottom);
   NECK_A = [0, 0.32 * h, 0];
   NECK_B = [0, -0.24 * t.head, 0];
@@ -57,16 +62,22 @@ export interface Ell {
   c: V3;
   r: V3;
 }
+/** lateral slimness of the asset barrel relative to the same slider values */
+export const ASSET_SLIM = 0.93;
 /** ellipsoids of the torso (torso frame) and head (head frame), from the current proportions */
 export function selfVolumes(t: Tuning = getRigTuning()) {
   const h = t.bodyH, bb = t.bodyBottom, bt = t.bodyTop, fat = t.belly;
   // The figurine is sculpted as a continuous upright torso, not the classic
   // pear scaled up. These same volumes drive the visible surface and paw
   // clearance, so the fuller chest cannot swallow a relaxed arm.
+  // The exported sculpt is a touch slimmer than the plush barrel at the same
+  // slider values; this factor is shared by the skin, the self-collision and
+  // the paw clearance so the mesh and the physics always agree.
+  const slim = isSculptedShape() ? (getShapeMode() === "asset" ? ASSET_SLIM : 1) : 1;
   const torso: Ell[] = isSculptedShape() ? [
-    { c: [0, -0.18 * h, 0], r: [0.4 * bb, 0.42 * h * (0.7 + 0.3 * bb), 0.33 * bb] },
-    { c: [0, 0.10 * h, -0.015], r: [0.38 * bt, 0.50 * h * (0.75 + 0.25 * bt), 0.27 * (0.55 + 0.45 * bt)] },
-    { c: [0, -0.10 * h, 0.055 + 0.07 * (fat - 1)], r: [0.31 * bb * (0.85 + 0.15 * fat), 0.38 * h * (0.85 + 0.15 * fat), 0.26 * fat] },
+    { c: [0, -0.18 * h, 0], r: [0.4 * bb * slim, 0.42 * h * (0.7 + 0.3 * bb), 0.33 * bb * slim] },
+    { c: [0, 0.10 * h, -0.015], r: [0.38 * bt * slim, 0.50 * h * (0.75 + 0.25 * bt), 0.27 * (0.55 + 0.45 * bt) * slim] },
+    { c: [0, -0.10 * h, 0.055 + 0.07 * (fat - 1)], r: [0.31 * bb * (0.85 + 0.15 * fat) * slim, 0.38 * h * (0.85 + 0.15 * fat), 0.26 * fat * slim] },
   ] : [
     { c: [0, -0.2 * h, 0], r: [0.4 * bb, 0.38 * h * (0.7 + 0.3 * bb), 0.33 * bb] },
     { c: [0, 0.14 * h, 0], r: [0.33 * bt, 0.34 * h * (0.65 + 0.35 * bt), 0.27 * (0.5 + 0.5 * bt)] },
