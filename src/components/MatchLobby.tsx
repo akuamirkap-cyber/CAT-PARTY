@@ -202,9 +202,9 @@ function LobbyStage({ roster, ready, paused }: StageProps) {
       scenery.update(t, dtFrame);
       for (let i = 0; i < actors.length; i++) {
         const a = actors[i];
+        // Idle only: the cats stand on the hill (no bouncing while matchmaking).
         poseStatic(a.v, t + a.phase);
-        const hop = Math.max(0, Math.sin(t * 2.1 + a.phase));
-        a.group.position.y = hop * hop * 0.1;
+        a.group.position.y = 0;
         // spring pop-in when the cat is built
         const k = Math.min(1, Math.max(0, (now - a.born) / 420));
         const overshoot = 1 + 0.18 * Math.sin(Math.PI * Math.min(1, k * 1.25));
