@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
+import { createRenderer } from "./webgl";
 import { animalById, type AccessoryId, type AnimalId } from "../game/animals";
 import { buildCharacterVisual, disposeCharacterDetails, poseStatic, type CharacterVisual } from "../game/characterMesh";
 import type { EyeStyleId, ExpressionId } from "../game/eyes";
@@ -15,11 +16,12 @@ export default function EyePreview(selection: Selection) {
   const update = useRef<((next: Selection) => void) | null>(null);
   useEffect(() => {
     const el = container.current!;
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    const renderer = createRenderer(el, { alpha: true, antialias: true });
+    if (!renderer) return;
+    renderer.domElement.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block";
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NeutralToneMapping;
-    el.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
     scene.add(new THREE.HemisphereLight(0xffffff, 0xffd4b4, 1.6));
     const light = new THREE.DirectionalLight(0xffffff, 1.9);

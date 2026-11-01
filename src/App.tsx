@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MenuScreen, { type MenuSheet } from "./components/MenuScreen";
 import MatchLobby from "./components/MatchLobby";
 import ScreenWipe, { type WipeHandle } from "./components/ScreenWipe";
+import ErrorBoundary from "./components/ErrorBoundary";
 import EyePreview from "./components/EyePreview";
 import GameView from "./components/GameView";
 import Portrait from "./components/Portrait";
@@ -104,13 +105,16 @@ export default function App() {
   return (
     <>
       {screen === "game" ? (
+        <ErrorBoundary key="arena" label="arena" onReset={() => go("menu")}>
         <GameView
           key={gameKey}
           options={{ p1Animal: p1, p2Animal: p2, twoPlayer, bots, p1Acc: acc1, p2Acc: acc2, p1Eyes: eyes, p1Expression: expression, mode, camMode, camZoom }}
           showTouch={showTouch && !twoPlayer}
           onExit={() => go("menu")}
         />
+        </ErrorBoundary>
       ) : screen === "matching" ? (
+        <ErrorBoundary key="matching" label="matching" onReset={() => setScreen("menu")}>
         <MatchLobby
           you={{ animal: p1, accessory: acc1, eyeStyle: eyes, expression }}
           friend={twoPlayer ? { animal: p2, accessory: acc2 } : null}
@@ -125,8 +129,9 @@ export default function App() {
           onCancel={() => go("menu")}
           onStart={() => go("game")}
         />
+        </ErrorBoundary>
       ) : (
-        <>
+        <ErrorBoundary key="menu" label="menu">
           <MenuScreen
             selected={p1}
             accessory={acc1}
@@ -146,7 +151,7 @@ export default function App() {
               return ANIMALS[(i + step + ANIMALS.length) % ANIMALS.length].id;
             })}
           />
-        </>
+        </ErrorBoundary>
       )}
       {/* the page wipe stays mounted so it can cover the screen swap */}
       <ScreenWipe handleRef={wipe} mode={wipeMode} />

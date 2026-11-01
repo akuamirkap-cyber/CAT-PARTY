@@ -537,3 +537,21 @@ body,
   .ml-picker strong { font-size: 20px; }
   .ml-hint { display: none; }
 }
+
+/* friendly fallback when a 3D canvas cannot start (no WebGL, GPU crash…) */
+.crash-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 320px; padding: 18px 20px; border-radius: 20px; background: rgba(255,248,236,.96); color: #3b2a1a; text-align: center; box-shadow: 0 10px 0 rgba(150,80,0,.22), 0 18px 36px rgba(120,60,0,.28); font-family: "Nunito", system-ui, sans-serif; z-index: 5; }
+.crash-note strong { font-size: 15px; font-weight: 900; }
+.crash-note span { font-size: 12px; font-weight: 700; color: #8a6a4d; }
+.crash-note button { margin-top: 4px; border: 0; border-radius: 12px; padding: 8px 16px; background: linear-gradient(180deg, #ffe14d, #ffb000); color: #4a2c00; font-weight: 900; box-shadow: 0 3px 0 #b45309; }
+
+.lineup-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px; text-align: center; font-family: "Nunito", system-ui, sans-serif; color: #7a4a22; }
+.lineup-fallback strong { font-size: 54px; line-height: 1; }
+.lineup-fallback span { max-width: 230px; font-size: 12px; font-weight: 800; color: #9b7a5c; }
+
+/* last-resort boot error card (styled with plain CSS so it always renders) */
+#boot-error { position: fixed; inset: auto 0 0 0; margin: 0 auto 24px; max-width: 420px; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 20px; border-radius: 18px; background: #fff8ec; color: #3b2a1a; font-family: "Nunito", system-ui, sans-serif; text-align: center; box-shadow: 0 8px 0 rgba(150,80,0,.25), 0 18px 40px rgba(0,0,0,.35); z-index: 9999; }
+#boot-error strong { font-size: 15px; font-weight: 900; }
+#boot-error span { font-size: 12px; font-weight: 700; color: #8a6a4d; word-break: break-word; }
+#boot-error button { border: 0; border-radius: 12px; padding: 8px 18px; background: linear-gradient(180deg,#ffe14d,#ffb000); color: #4a2c00; font-weight: 900; box-shadow: 0 3px 0 #b45309; cursor: pointer; }
+
+.ml-gl-note { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 5; max-width: 78vw; padding: 6px 14px; border-radius: 999px; background: rgba(59,42,26,.72); color: #ffeccc; font-family: "Nunito", system-ui, sans-serif; font-size: 11px; font-weight: 800; text-align: center; }

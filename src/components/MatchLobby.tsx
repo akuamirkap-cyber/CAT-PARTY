@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { ACCESSORIES, ANIMALS, animalById, type AccessoryId, type AnimalId } from "../game/animals";
 import { poseStatic } from "../game/characterMesh";
+import { createRenderer } from "./webgl";
 import { addLobbyLights, buildLobbyScenery, disposeLobbyActor, frameLobbyCamera, lobbySpacing, makeLobbyActor, type LobbyActor } from "./lobbyStage";
 import { preloadCharacters } from "../game/characterPreload";
 import Portrait from "./Portrait";
@@ -66,22 +67,31 @@ interface StageProps {
 const CAMERA_FOV = 30;
 
 function LobbyStage({ roster, ready, paused }: StageProps) {
+  const [glDead, setGlDead] = useState(false);
   const host = useRef<HTMLDivElement>(null);
   const tags = useRef<HTMLDivElement>(null);
   const tagRefs = useRef<(HTMLDivElement | null)[]>([]);
 
   useEffect(() => {
     const el = host.current!;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" });
+    const renderer = createRenderer(
+      el,
+      { antialias: true, alpha: true, powerPreference: "low-power" },
+      () => setGlDead(true),
+    );
+    if (!renderer) {
+      // Keep the DOM (hill, roster, dock) alive — never a blank stage.
+      setGlDead(true);
+      return;
+    }
+    const canvas = renderer.domElement;
+    canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block";
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.6));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.12;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    const canvas = renderer.domElement;
-    canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block";
-    el.appendChild(canvas);
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(CAMERA_FOV, 1, 0.1, 400);
@@ -227,6 +237,11 @@ function LobbyStage({ roster, ready, paused }: StageProps) {
   return (
     <>
       <div ref={host} className="ml-stage" aria-hidden="true" />
+      {glDead && (
+        <div className="ml-gl-note" role="status">
+          Mode ringan: 3D mati di perangkat ini, tetap bisa lanjut main.
+        </div>
+      )}
       <div ref={tags} className="ml-tags" aria-hidden="true">
         {roster.map((member, i) => (
           <div

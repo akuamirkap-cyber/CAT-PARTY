@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { ANIMALS } from "../game/animals";
 import { buildCharacterVisual, disposeCharacterDetails, poseStatic, type CharacterVisual } from "../game/characterMesh";
+import { createRenderer } from "./webgl";
 
 /**
  * Three live 3D "game slides" shown together so the two reference menu designs
@@ -280,16 +281,16 @@ function SlideView({ kind }: { kind: SlideKind }) {
 
   useEffect(() => {
     const el = host.current!;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: "low-power" });
+    const renderer = createRenderer(el, { antialias: true, alpha: true, powerPreference: "low-power" });
+    if (!renderer) return;
+    const canvas = renderer.domElement;
+    canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block";
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_DPR));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.08;
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    const canvas = renderer.domElement;
-    canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block";
-    el.appendChild(canvas);
 
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 60);

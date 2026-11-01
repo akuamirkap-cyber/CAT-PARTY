@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { ACCESSORIES, ANIMALS, type AccessoryId, type AnimalId } from "../game/animals";
 import { buildCharacterVisual, disposeCharacterDetails, poseStatic, type CharacterVisual } from "../game/characterMesh";
 import type { EyeStyleId, ExpressionId } from "../game/eyes";
 import { subscribeTuning } from "../game/tuning";
 import { preloadCharacters, type PreloadJob } from "../game/characterPreload";
+import { createRenderer } from "./webgl";
 
 interface Props {
   selected: AnimalId;
@@ -15,6 +16,7 @@ interface Props {
 }
 
 export default function LineupPreview({ selected, accessory, eyeStyle, expression, active }: Props) {
+  const [failed, setFailed] = useState(false);
   const activeRef = useRef(active);
   const accRef = useRef(accessory);
   const eyeRef = useRef(eyeStyle);
@@ -38,13 +40,20 @@ export default function LineupPreview({ selected, accessory, eyeStyle, expressio
 
   useEffect(() => {
     const el = ref.current!;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    // A missing/blocked WebGL context must not take the menu down with it.
+    const renderer = createRenderer(el, { antialias: true, alpha: true });
+    if (!renderer) {
+      // No WebGL: fall back to a friendly portrait instead of an empty stage.
+      setFailed(true);
+      return;
+    }
+    const canvas = renderer.domElement;
+    canvas.style.cssText = "position:absolute;inset:0;width:100%;height:100%;display:block";
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.NeutralToneMapping;
     renderer.toneMappingExposure = 1.1;
     renderer.shadowMap.enabled = true;
-    el.appendChild(renderer.domElement);
     const scene = new THREE.Scene();
     const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 100);
     camera.position.set(0, 1.15, 8.6);
@@ -177,5 +186,14 @@ export default function LineupPreview({ selected, accessory, eyeStyle, expressio
     };
   }, []);
 
-  return <div ref={ref} className="absolute inset-0" />;
+  return (
+    <div ref={ref} className="absolute inset-0">
+      {failed && (
+        <div className="lineup-fallback" role="status">
+          <strong>😿</strong>
+          <span>Pratinjau 3D butuh WebGL. Menumu tetap bisa dimainkan.</span>
+        </div>
+      )}
+    </div>
+  );
 }
