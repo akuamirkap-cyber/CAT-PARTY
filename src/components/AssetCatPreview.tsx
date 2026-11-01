@@ -228,7 +228,10 @@ export default function AssetCatPreview({ animal, active }: Props) {
 
     // Build the visible cat first; the spare one follows so the menu stays snappy.
     let spareTimer = 0;
+    const started: Partial<Record<AssetId, boolean>> = {};
     const buildOne = (id: AssetId) => {
+      if (started[id]) return;
+      started[id] = true;
       try {
         const worker = new Worker(new URL("../catasset/worker.ts", import.meta.url), { type: "module" });
         workers.push(worker);
@@ -251,8 +254,11 @@ export default function AssetCatPreview({ animal, active }: Props) {
       }
     };
     buildOne(assetRef.current);
-    const spare: AssetId = assetRef.current === "oyen" ? "siam" : "oyen";
-    spareTimer = window.setTimeout(() => buildOne(spare), 900);
+    spareTimer = window.setTimeout(() => {
+      buildOne(assetRef.current === "oyen" ? "siam" : "oyen");
+      // the player may have flipped cats while the first one baked
+      buildOne(assetRef.current);
+    }, 900);
 
     const resize = () => {
       const w = Math.max(1, el.clientWidth);
