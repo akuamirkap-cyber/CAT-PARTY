@@ -539,10 +539,14 @@ body,
 }
 
 /* friendly fallback when a 3D canvas cannot start (no WebGL, GPU crash…) */
-.crash-note { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; flex-direction: column; align-items: center; gap: 8px; max-width: 320px; padding: 18px 20px; border-radius: 20px; background: rgba(255,248,236,.96); color: #3b2a1a; text-align: center; box-shadow: 0 10px 0 rgba(150,80,0,.22), 0 18px 36px rgba(120,60,0,.28); font-family: "Nunito", system-ui, sans-serif; z-index: 5; }
-.crash-note strong { font-size: 15px; font-weight: 900; }
-.crash-note span { font-size: 12px; font-weight: 700; color: #8a6a4d; }
-.crash-note button { margin-top: 4px; border: 0; border-radius: 12px; padding: 8px 16px; background: linear-gradient(180deg, #ffe14d, #ffb000); color: #4a2c00; font-weight: 900; box-shadow: 0 3px 0 #b45309; }
+.crash-note { position: fixed; inset: 0; z-index: 150; display: grid; place-items: center; padding: 20px; background: radial-gradient(ellipse at 50% 40%, #ffc23d, #ffaa16 45%, #f39200); font-family: "Nunito", system-ui, sans-serif; }
+.crash-card { display: flex; flex-direction: column; align-items: center; gap: 8px; width: min(360px, 92vw); padding: 22px 22px 18px; border-radius: 24px; background: #fff8ec; color: #3b2a1a; text-align: center; box-shadow: 0 10px 0 rgba(150,80,0,.25), 0 22px 40px rgba(120,60,0,.3); }
+.crash-emoji { font-size: 44px; line-height: 1; }
+.crash-card strong { font-size: 16px; font-weight: 900; }
+.crash-card span { font-size: 12.5px; font-weight: 700; color: #8a6a4d; line-height: 1.45; }
+.crash-card code { max-width: 100%; padding: 6px 10px; border-radius: 10px; background: rgba(59,42,26,.07); color: #7d5a3a; font-family: ui-monospace, "SFMono-Regular", monospace; font-size: 10.5px; word-break: break-word; }
+.crash-note button { margin-top: 6px; border: 0; border-radius: 14px; padding: 10px 20px; background: linear-gradient(180deg, #ffe14d, #ffb000); color: #4a2c00; font-family: inherit; font-weight: 900; letter-spacing: .02em; box-shadow: 0 4px 0 #b45309; cursor: pointer; }
+.crash-note button:active { transform: translateY(2px); box-shadow: 0 2px 0 #b45309; }
 
 .lineup-fallback { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; padding: 18px; text-align: center; font-family: "Nunito", system-ui, sans-serif; color: #7a4a22; }
 .lineup-fallback strong { font-size: 54px; line-height: 1; }

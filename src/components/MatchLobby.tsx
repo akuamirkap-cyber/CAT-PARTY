@@ -158,12 +158,16 @@ function LobbyStage({ roster, ready, paused }: StageProps) {
     };
     rebuild();
 
+    // Framed distance, filled by resize() and used by the pointer parallax.
+    // Declared before resize() runs: touching it later was a TDZ crash.
+    let framedDist = camera.position.z;
+
     const resize = () => {
       const w = Math.max(1, el.clientWidth);
       const h = Math.max(1, el.clientHeight);
       renderer.setSize(w, h, false);
       frameLobbyCamera(camera, roster.length, w / h);
-      distRef.current = camera.position.z;
+      framedDist = camera.position.z;
     };
     resize();
     const ro = new ResizeObserver(resize);
@@ -179,8 +183,6 @@ function LobbyStage({ roster, ready, paused }: StageProps) {
     window.addEventListener("pointermove", onPointer, { passive: true });
 
     const head = new THREE.Vector3();
-    // remember the framed distance so the pointer parallax can pull back to it
-    const distRef = { current: 0 };
     let lastFrame = performance.now();
     let raf = 0;
     const t0 = performance.now();
@@ -194,7 +196,7 @@ function LobbyStage({ roster, ready, paused }: StageProps) {
       camera.updateMatrixWorld();
       camera.position.x += (pointer.x * 0.42 - camera.position.x) * 0.05;
       camera.position.y += (1.62 - pointer.y * 0.14 - camera.position.y) * 0.05;
-      camera.position.z += (distRef.current - camera.position.z) * 0.06;
+      camera.position.z += (framedDist - camera.position.z) * 0.06;
       camera.lookAt(0, 1.34, -3);
       camera.updateMatrixWorld();
       scenery.update(t, dtFrame);

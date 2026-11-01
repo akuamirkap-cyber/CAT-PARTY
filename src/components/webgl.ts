@@ -1,5 +1,13 @@
 import * as THREE from "three";
 
+type RendererFactory = (options: THREE.WebGLRendererParameters) => THREE.WebGLRenderer | null;
+
+/** Test hook: lets the mount smoke test run the real scene setup without a GPU. */
+let testFactory: RendererFactory | null = null;
+export function setRendererFactoryForTests(factory: RendererFactory | null) {
+  testFactory = factory;
+}
+
 /**
  * Create a WebGL renderer, or `null` when the device cannot give us a context
  * (GPU blocklisted, too many live contexts, headless preview…). Callers must
@@ -11,7 +19,13 @@ export function createRenderer(
   onLost?: () => void,
 ): THREE.WebGLRenderer | null {
   try {
-    const renderer = new THREE.WebGLRenderer(options);
+    const renderer = testFactory
+      ? testFactory(options)
+      : (new THREE.WebGLRenderer(options) as THREE.WebGLRenderer);
+    if (!renderer) {
+      console.warn("[meow-brawl] WebGL renderer unavailable");
+      return null;
+    }
     el.appendChild(renderer.domElement);
     // A lost GPU context (driver reset, too many live contexts) does not throw —
     // the canvas just goes black. Report it so the screen can show a fallback.

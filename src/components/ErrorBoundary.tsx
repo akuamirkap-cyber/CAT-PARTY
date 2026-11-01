@@ -37,9 +37,15 @@ export default class ErrorBoundary extends Component<Props, State> {
     if (this.props.fallback) return this.props.fallback;
     return (
       <div className="crash-note" role="alert">
-        <strong>Bagian 3D gagal dimuat</strong>
-        <span>{error.message || "Perangkat ini tidak bisa membuat konteks WebGL."}</span>
-        <button type="button" onClick={this.reset}>COBA LAGI</button>
+        <div className="crash-card">
+          <b className="crash-emoji">😿</b>
+          <strong>Bagian 3D gagal dimuat</strong>
+          <span>Kucingnya masih aman — cuma panggung 3D-nya yang error. Coba lagi, atau balik ke menu.</span>
+          <code>{error.message || "Konteks WebGL tidak tersedia"}</code>
+          <button type="button" onClick={this.reset}>
+            {this.props.onReset ? "KEMBALI & COBA LAGI" : "COBA LAGI"}
+          </button>
+        </div>
       </div>
     );
   }
