@@ -12,6 +12,9 @@ export default defineConfig(() => {
       },
     },
     server: {
+      host: "0.0.0.0",
+      // Allow sandbox preview hosts (e.g. https://{port}-{sandboxId}.e2b.app)
+      allowedHosts: true,
       hmr: process.env.DISABLE_HMR !== 'true',
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
     },

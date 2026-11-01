@@ -283,7 +283,7 @@ export class BombManager {
         b.root.position.y += (Math.random() - 0.5) * 0.05;
       }
       // danger ring follows on the ground
-      b.ring.position.set(p.x, 0.05, p.z);
+      b.ring.position.set(p.x, arena.surfaceHeight(p.z) + 0.04, p.z);
       (b.ring.material as THREE.MeshBasicMaterial).opacity = 0.28 + 0.18 * Math.sin(time * 6 + b.seed) + urgency * 0.15;
       b.ring.visible = p.y > -2;
     }

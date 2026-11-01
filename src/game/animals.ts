@@ -54,8 +54,6 @@ export const ACCESSORIES: { id: AccessoryId; name: string; icon: string }[] = [
   { id: "none", name: "Polos", icon: "🚫" },
   { id: "capNewRed", name: "Topi Baseball Merah", icon: "🧢" },
   { id: "capNewBlue", name: "Topi Baseball Biru", icon: "🧢" },
-  { id: "capRed", name: "Topi Lawas Merah", icon: "🧢" },
-  { id: "capBlue", name: "Topi Lawas Biru", icon: "🧢" },
   { id: "dolit", name: "Paman Dolit", icon: "🥸" },
   { id: "helmet", name: "Helm Fullface", icon: "⛑️" },
 ];

@@ -126,17 +126,14 @@ export function IslandIcon() {
 export function AccessoryIcon({ id, size = 20 }: { id: AccessoryId; size?: number }) {
   if (id === "capRed" || id === "capBlue" || id === "capNewRed" || id === "capNewBlue") {
     const isRed = id === "capRed" || id === "capNewRed";
-    const isNew = id === "capNewRed" || id === "capNewBlue";
     const main = isRed ? "#e8343c" : "#2f6fe0";
     const dark = isRed ? "#a3121d" : "#1b4496";
     return (
       <Svg size={size}>
-        <path d="M4 13c0-4.5 3.5-8 8-8s8 3.5 8 8" fill={isNew ? "#f7f4ee" : main} stroke={dark} strokeWidth="1.8" strokeLinejoin="round" />
-        {isNew && <path d="M9 5.6C10.4 5 13.6 5 15 5.6L14.2 13H9.8L9 5.6Z" fill={main} stroke={dark} strokeWidth="1.2" strokeLinejoin="round" />}
+        <path d="M4 13c0-4.5 3.5-8 8-8s8 3.5 8 8" fill={main} stroke={dark} strokeWidth="1.8" strokeLinejoin="round" />
         <path d="M3 13h18" stroke={dark} strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M15 13c2.6 0 5 .7 5 1.6S18.6 16 15 16" fill={isNew ? main : "#fff"} stroke={dark} strokeWidth="1.6" strokeLinejoin="round" />
-        <circle cx="12" cy="5.4" r="1.1" fill={isNew ? main : "#fff"} stroke={dark} strokeWidth="1.2" />
-        {isNew && <path d="m18.6 2.6.7 1.5 1.6.2-1.2 1.1.3 1.6-1.4-.8-1.4.8.3-1.6-1.2-1.1 1.6-.2.7-1.5Z" fill="#ffd23f" stroke="#a36a00" strokeWidth="0.7" strokeLinejoin="round" />}
+        <path d="M15 13c2.6 0 5 .7 5 1.6S18.6 16 15 16" fill={main} stroke={dark} strokeWidth="1.6" strokeLinejoin="round" />
+        <circle cx="12" cy="5.4" r="1.1" fill={main} stroke={dark} strokeWidth="1.2" />
       </Svg>
     );
   }

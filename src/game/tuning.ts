@@ -38,8 +38,8 @@ export const TUNING_DEFAULTS: Tuning = {
   bodyBottom: 0.7,
   armRoot: 1.35,
   armTip: 0.81,
-  legRoot: 0.94,
-  legTip: 0.74,
+  legRoot: 0.77,
+  legTip: 0.70,
   armLen: 0.96,
   bodyH: 0.59,
   belly: 0.75,
@@ -80,7 +80,15 @@ export const TUNING_SPECS: TuningSpec[] = [
   { key: "legTip", label: "Ujung kaki", min: 0.7, max: 1.5, step: 0.01, group: "Tangan & Kaki" },
 ];
 
-const STORAGE = "meowbrawl.tuning.v5";
+const STORAGE = "meowbrawl.tuning.v6";
+const PREVIOUS_STORAGE = "meowbrawl.tuning.v5";
+const SHAPE_STORAGE = "meowbrawl.shapeMode.v1";
+export type ShapeMode = "classic" | "figure";
+function loadShapeMode(): ShapeMode {
+  try { return typeof localStorage !== "undefined" && localStorage.getItem(SHAPE_STORAGE) === "figure" ? "figure" : "classic"; }
+  catch { return "classic"; }
+}
+let shapeMode: ShapeMode = loadShapeMode();
 let current: Tuning = load();
 const listeners = new Set<() => void>();
 
@@ -88,6 +96,14 @@ function load(): Tuning {
   try {
     const raw = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE) : null;
     if (raw) return { ...TUNING_DEFAULTS, ...JSON.parse(raw) };
+    // Carry earlier custom proportions forward once, while applying the newly
+    // requested 77%/70% leg sizes even for existing players.
+    const old = typeof localStorage !== "undefined" ? localStorage.getItem(PREVIOUS_STORAGE) : null;
+    if (old) {
+      const migrated = { ...TUNING_DEFAULTS, ...JSON.parse(old), legRoot: 0.77, legTip: 0.70 };
+      localStorage.setItem(STORAGE, JSON.stringify(migrated));
+      return migrated;
+    }
   } catch {
     /* ignore */
   }
@@ -95,8 +111,39 @@ function load(): Tuning {
 }
 
 export const getTuning = () => current;
+export const getShapeMode = () => shapeMode;
+// Shape mode is a reversible geometry transform, not a destructive slider preset.
+// In particular, all face/eye settings and the user's custom proportions survive.
+let effectiveSource: Tuning | null = null;
+let effectiveMode: ShapeMode | null = null;
+let effective: Tuning = current;
+export function getRigTuning(): Tuning {
+  if (effectiveSource !== current || effectiveMode !== shapeMode) {
+    effectiveSource = current;
+    effectiveMode = shapeMode;
+    effective = shapeMode === "figure" ? {
+      ...current,
+      bodyTop: current.bodyTop * 1.24,
+      bodyBottom: current.bodyBottom * 1.25,
+      bodyH: current.bodyH * 1.10,
+      legH: current.legH * 0.86,
+      armTip: current.armTip * 1.08,
+    } : current;
+  }
+  return effective;
+}
 export const tuningKey = (t: Tuning = current) =>
-  (Object.keys(TUNING_DEFAULTS) as (keyof Tuning)[]).map((k) => t[k].toFixed(3)).join("|");
+  `${shapeMode}|` + (Object.keys(TUNING_DEFAULTS) as (keyof Tuning)[]).map((k) => t[k].toFixed(3)).join("|");
+
+export function setShapeMode(mode: ShapeMode) {
+  if (mode === shapeMode) return;
+  shapeMode = mode;
+  try { localStorage.setItem(SHAPE_STORAGE, mode); } catch { /* storage is optional */ }
+  // A fresh snapshot makes both shape and existing tuning subscribers update.
+  current = { ...current };
+  listeners.forEach((l) => l());
+}
+export const useShapeMode = () => useSyncExternalStore(subscribeTuning, getShapeMode);
 
 export function setTuning(patch: Partial<Tuning>) {
   current = { ...current, ...patch };

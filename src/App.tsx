@@ -1,26 +1,32 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import LineupPreview from "./components/LineupPreview";
-import MobileMenu from "./components/MobileMenu";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import MenuScreen, { type MenuSheet } from "./components/MenuScreen";
+import MatchLobby from "./components/MatchLobby";
+import ScreenWipe, { type WipeHandle } from "./components/ScreenWipe";
+import EyePreview from "./components/EyePreview";
 import GameView from "./components/GameView";
 import Portrait from "./components/Portrait";
-import SettingsButton from "./components/SettingsButton";
-import { BombIcon } from "./components/icons";
 import TuningPanel from "./components/TuningPanel";
-import { JuicyButton, RailTab, RoundBtn, Sheet, Sparkles, StatPill, Toggle, TONES, uiBtn } from "./components/ui";
+import { JuicyButton, Sheet, Toggle, TONES, uiBtn } from "./components/ui";
+import { Cat, Eye, Smile } from "lucide-react";
 import { ACCESSORIES, ANIMALS, animalById, type AccessoryId, type AnimalId } from "./game/animals";
-import { initAudio, setMuted } from "./game/audio";
-import { setInputEnabled } from "./game/input";
-import { renderPortrait } from "./game/portraits";
-import { tuningKey, useTuning } from "./game/tuning";
+import { EYE_STYLES, EXPRESSIONS, type EyeStyleId, type ExpressionId } from "./game/eyes";
+import { initAudio } from "./game/audio";
+import { hasPortrait, resetPortraitsForCurrentTuning, storeWorkerPortrait } from "./game/portraits";
+import { preloadCharacters } from "./game/characterPreload";
+import { disposePortraitFallback, renderPortraitFallback } from "./game/portraitFallback";
+import { setShapeMode, tuningKey, useShapeMode, useTuning } from "./game/tuning";
 
-type Screen = "select" | "game";
-type SheetId = "char" | "acc" | "tuning" | "settings" | "info" | "mission" | null;
+type Screen = "menu" | "matching" | "game";
+type SheetId = MenuSheet | null;
 
 export default function App() {
-  const [screen, setScreen] = useState<Screen>("select");
+  const [screen, setScreen] = useState<Screen>("menu");
   const [p1, setP1] = useState<AnimalId>("oyen");
   const [p2, setP2] = useState<AnimalId>("item");
   const [acc1, setAcc1] = useState<AccessoryId>("capNewRed");
+  const [eyes, setEyes] = useState<EyeStyleId>("default");
+  const [expression, setExpression] = useState<ExpressionId>("default");
+  const [faceTab, setFaceTab] = useState<"eyes" | "expression">("eyes");
   const [acc2, setAcc2] = useState<AccessoryId>("capNewBlue");
   const [twoPlayer, setTwoPlayer] = useState(false);
   const [bots, setBots] = useState(5);
@@ -39,354 +45,109 @@ export default function App() {
   const [gameKey, setGameKey] = useState(0);
   const [sheet, setSheet] = useState<SheetId>(null);
 
-  const start = useCallback(() => {
+  const wipe = useRef<WipeHandle>(null);
+  /** Swap screens behind the page-wipe transition. */
+  const go = useCallback((dest: Screen, sheetAfter: SheetId = null) => {
     initAudio();
-    setSheet(null);
-    setGameKey((k) => k + 1);
-    setScreen("game");
+    void wipe.current?.play(dest, () => {
+      if (dest === "game") setGameKey((k) => k + 1);
+      setScreen(dest);
+      setSheet(sheetAfter);
+    });
   }, []);
-  const exit = useCallback(() => setScreen("select"), []);
+  const start = useCallback(() => go("matching"), [go]);
 
   const tKey = tuningKey(useTuning());
+  const shapeMode = useShapeMode();
   useEffect(() => {
-    let i = 0;
-    let timer = 0;
-    const next = () => {
-      if (i >= ANIMALS.length) return;
-      renderPortrait(ANIMALS[i++]);
-      timer = window.setTimeout(next, 150);
-    };
-    timer = window.setTimeout(next, 1200);
-    return () => clearTimeout(timer);
-  }, [tKey]);
+    // Generate full-detail portraits and reusable body meshes in a worker so
+    // the menu stays responsive instead of repeatedly blocking the main thread.
+    if (screen !== "menu" || sheet === "tuning" || sheet === "eyes") return;
+    resetPortraitsForCurrentTuning();
+    const controller = new AbortController();
+    const seen = new Set<string>();
+    const ordered = [
+      { id: p1, noEars: false, portrait: { eyeStyle: eyes, expression } },
+      ...ANIMALS.map(def => ({ id: def.id, noEars: false, portrait: { eyeStyle: "default" as const, expression: "default" as const } })),
+    ].filter(job => {
+      const key = `${job.id}:${job.portrait.eyeStyle}:${job.portrait.expression}`;
+      if (seen.has(key) || hasPortrait(job.id, job.portrait.eyeStyle, job.portrait.expression)) return false;
+      seen.add(key);
+      return true;
+    });
+    // A failed/unsupported worker leaves the existing emoji fallbacks intact.
+    const timer = window.setTimeout(() => {
+      void preloadCharacters(ordered, { signal: controller.signal, onPortrait: result => {
+        if (result.portrait) storeWorkerPortrait(result);
+        else renderPortraitFallback(result);
+      }, delayMs: 120 }).catch(() => {}).finally(disposePortraitFallback);
+    }, 1500);
+    return () => { clearTimeout(timer); controller.abort(); };
+  }, [tKey, screen, p1, eyes, expression, sheet]);
 
   useEffect(() => {
-    if (screen !== "select") return;
+    if (screen !== "menu") return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.code === "Escape") {
-        setSheet(null);
-        return;
-      }
-      // Let focused controls handle Enter, Space and arrow keys themselves.
-      const target = e.target as HTMLElement | null;
-      if (sheet || target?.closest("button, input, select, textarea, [contenteditable='true']")) return;
-      const idx = ANIMALS.findIndex((a) => a.id === p1);
-      if (e.code === "ArrowRight" || e.code === "KeyD") setP1(ANIMALS[(idx + 1) % ANIMALS.length].id);
-      if (e.code === "ArrowLeft" || e.code === "KeyA") setP1(ANIMALS[(idx - 1 + ANIMALS.length) % ANIMALS.length].id);
-      if (e.code === "Enter" || e.code === "Space") {
-        start();
-      }
+      if (e.code === "Escape") setSheet(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [screen, p1, start, sheet]);
-
-  if (screen === "game") {
-    return (
-      <GameView
-        key={gameKey}
-        options={{ p1Animal: p1, p2Animal: p2, twoPlayer, bots, p1Acc: acc1, p2Acc: acc2, mode, camMode, camZoom }}
-        showTouch={showTouch && !twoPlayer}
-        onExit={exit}
-      />
-    );
-  }
+  }, [screen]);
 
   const sel = animalById(p1);
-  const fighters = bots + (twoPlayer ? 2 : 1);
 
   return (
-    <div
-      className="fixed inset-0 select-none overflow-hidden font-sans"
-      style={{ background: "linear-gradient(180deg,#63c8ff 0%,#9cc2ff 34%,#cdb4ff 56%,#ffc9de 74%,#ffe3b8 92%)" }}
-    >
-      {/* ---------- sky decorations ---------- */}
-      <div className="pointer-events-none absolute -left-20 -top-20 h-72 w-72">
-        <div className="sun-rays absolute inset-0 rounded-full" />
-        <div className="absolute inset-[52px] rounded-full bg-gradient-to-b from-[#fff7c4] to-[#ffd93c] shadow-[0_0_50px_rgba(255,220,80,.9)]" />
-      </div>
-      <div className="pointer-events-none absolute -right-24 top-[8%] h-72 w-72 rounded-full bg-pink-200/50 blur-3xl" />
-      <div className="pointer-events-none absolute left-[30%] top-[30%] h-40 w-40 rounded-full bg-white/25 blur-2xl" />
-      {/* rainbow arch behind the lockers */}
-      <div className="pointer-events-none absolute left-1/2 top-[2%] h-[420px] w-[720px] max-w-[130vw] -translate-x-1/2 opacity-50">
-        <div className="absolute inset-0 rounded-t-full border-[22px] border-[#ff9eb5]/70" />
-        <div className="absolute inset-[22px] rounded-t-full border-[22px] border-[#ffd93c]/70" />
-        <div className="absolute inset-[44px] rounded-t-full border-[22px] border-[#8fe3a8]/70" />
-        <div className="absolute inset-[66px] rounded-t-full border-[22px] border-[#8fd8ff]/70" />
-      </div>
-      {/* drifting clouds */}
-      <div className="cloud-drift pointer-events-none absolute left-[6%] top-[9%] h-9 w-32 rounded-full bg-white/90 blur-[1px]" />
-      <div className="cloud-drift-slow pointer-events-none absolute right-[8%] top-[7%] hidden h-12 w-44 rounded-full bg-white/90 blur-[1px] sm:block" />
-      <div className="cloud-drift pointer-events-none absolute left-[38%] top-[13%] h-6 w-24 rounded-full bg-white/70 blur-[1px]" style={{ animationDelay: "-4s" }} />
-      <div className="cloud-drift-slow pointer-events-none absolute right-[30%] top-[20%] h-7 w-28 rounded-full bg-white/60 blur-[1px]" style={{ animationDelay: "-7s" }} />
-      {/* bunting flags */}
-      <div className="bunting pointer-events-none absolute inset-x-0 top-[86px] z-10 hidden justify-center gap-1.5 sm:flex md:top-[92px]">
-        {Array.from({ length: 22 }).map((_, i) => (
-          <span
-            key={i}
-            className="h-0 w-0 border-x-[9px] border-t-[14px] border-x-transparent drop-shadow-sm"
-            style={{ borderTopColor: ["#ff6f8f", "#ffd23f", "#5fd65a", "#41a6ff", "#b36bff"][i % 5], animationDelay: `${(i % 6) * 0.18}s` }}
+    <>
+      {screen === "game" ? (
+        <GameView
+          key={gameKey}
+          options={{ p1Animal: p1, p2Animal: p2, twoPlayer, bots, p1Acc: acc1, p2Acc: acc2, p1Eyes: eyes, p1Expression: expression, mode, camMode, camZoom }}
+          showTouch={showTouch && !twoPlayer}
+          onExit={() => go("menu")}
+        />
+      ) : screen === "matching" ? (
+        <MatchLobby
+          you={{ animal: p1, accessory: acc1, eyeStyle: eyes, expression }}
+          friend={twoPlayer ? { animal: p2, accessory: acc2 } : null}
+          bots={bots}
+          mode={mode}
+          onChangeAnimal={(step) => setP1((cur) => {
+            const i = ANIMALS.findIndex((a) => a.id === cur);
+            return ANIMALS[(i + step + ANIMALS.length) % ANIMALS.length].id;
+          })}
+          onPickAnimal={(id) => setP1(id)}
+          onWardrobe={() => go("menu", "acc")}
+          onCancel={() => go("menu")}
+          onStart={() => go("game")}
+        />
+      ) : (
+        <>
+          <MenuScreen
+            selected={p1}
+            accessory={acc1}
+            eyeStyle={eyes}
+            expression={expression}
+            mode={mode}
+            bots={bots}
+            twoPlayer={twoPlayer}
+            active={sheet === null}
+            onPlay={start}
+            onOpenSheet={(next) => setSheet(next)}
+            onMode={setMode}
+            onBots={setBots}
+            onTwoPlayer={setTwoPlayer}
+            onSelectAnimal={(step) => setP1((cur) => {
+              const i = ANIMALS.findIndex((a) => a.id === cur);
+              return ANIMALS[(i + step + ANIMALS.length) % ANIMALS.length].id;
+            })}
           />
-        ))}
-      </div>
-      <Sparkles className="opacity-80" />
-
-      {/* pastel lockers with depth + stickers */}
-      <div className="pointer-events-none absolute inset-x-0 top-[15%] flex h-[44%] justify-center gap-1.5 px-3 sm:gap-2.5 md:top-[13%]">
-        {Array.from({ length: 11 }).map((_, i) => (
-          <div
-            key={i}
-            className="relative h-full w-[6.4%] min-w-[36px] max-w-[92px] rounded-3xl border-[3px] border-white/85 shadow-[0_10px_18px_rgba(70,90,150,.18),inset_0_-16px_22px_rgba(0,0,0,.06),inset_0_4px_0_rgba(255,255,255,.7)]"
-            style={{
-              background: `linear-gradient(180deg,${["#e3f5ff", "#ffe7f2", "#e2fbee", "#fff6cf", "#ece8ff"][i % 5]} 0%,${["#c4e7ff", "#ffc9de", "#bff0d2", "#ffe3a1", "#d3ccff"][i % 5]} 100%)`,
-              transform: `rotate(${(i % 2 ? 1 : -1) * 0.7}deg)`,
-            }}
-          >
-            <div className="mx-auto mt-3 h-1.5 w-1/2 rounded-full bg-white/90 shadow-sm" />
-            <div className="mx-auto mt-1.5 h-1.5 w-1/2 rounded-full bg-white/80" />
-            <div className="mx-auto mt-1.5 h-1.5 w-1/2 rounded-full bg-white/80" />
-            <div className="absolute inset-x-3 top-1/2 h-px bg-white/70" />
-            <div className="absolute bottom-4 left-1/2 h-6 w-2 -translate-x-1/2 rounded-full border-2 border-white bg-white/60 shadow" />
-            {(i === 2 || i === 5 || i === 8) && <span className="absolute left-1/2 top-[30%] -translate-x-1/2 text-sm drop-shadow">⭐</span>}
-            {i === 6 && <span className="absolute left-1/2 top-[30%] -translate-x-1/2 text-sm drop-shadow">💗</span>}
-          </div>
-        ))}
-      </div>
-      {/* hills between wall and floor */}
-      <div className="pointer-events-none absolute inset-x-[-10%] bottom-[27%] h-24 md:bottom-[33%]">
-        <div className="absolute bottom-0 left-[4%] h-16 w-[34%] rounded-[50%] bg-[#a8ecb6]" />
-        <div className="absolute bottom-0 right-[5%] h-20 w-[38%] rounded-[50%] bg-[#8fe0c0]" />
-        <div className="absolute bottom-2 left-[30%] h-12 w-[40%] rounded-[50%] bg-[#c8f5d2]" />
-      </div>
-      {/* floor with texture + spotlight */}
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[30%] md:h-[38%]" style={{ background: "linear-gradient(180deg,#ffedc9 0%,#ffdca8 45%,#ffbf8b 100%)" }}>
-        <div className="floor-dots absolute inset-0 opacity-60" />
-        <div className="absolute inset-x-0 top-0 h-2.5 bg-white/60" />
-        <div className="absolute inset-x-0 top-2.5 h-1 bg-[#f0a35e]/40" />
-        <div className="spot-glow absolute bottom-[46%] left-1/2 h-16 w-[300px] max-w-[70vw] rounded-[50%] bg-[#ffe27a]/70 blur-xl" />
-        <div className="absolute bottom-[30%] left-[12%] hidden text-lg opacity-60 sm:block">🐾</div>
-        <div className="absolute bottom-[22%] left-[18%] hidden text-sm opacity-40 sm:block">🐾</div>
-        <div className="absolute bottom-[30%] right-[12%] hidden text-lg opacity-60 sm:block">🐾</div>
-        <div className="absolute bottom-[22%] right-[18%] hidden text-sm opacity-40 sm:block">🐾</div>
-      </div>
-
-      {/* ---------- 3D stage (podium + spotlight live inside the 3D scene) ---------- */}
-      <div className="absolute inset-x-0 top-[13%] bottom-[300px] z-10 md:top-[5%] md:bottom-[272px]">
-        <LineupPreview selected={p1} accessory={acc1} />
-      </div>
-
-      {/* ---------- mobile menu (phones & small tablets) ---------- */}
-      <MobileMenu
-        p1={p1}
-        setP1={setP1}
-        acc1={acc1}
-        setAcc1={setAcc1}
-        bots={bots}
-        setBots={setBots}
-        twoPlayer={twoPlayer}
-        showTouch={showTouch}
-        setShowTouch={setShowTouch}
-        fighters={fighters}
-        setSheet={setSheet}
-        start={start}
-        mode={mode}
-        setMode={setMode}
-        camMode={camMode}
-        setCamMode={setCamMode}
-        camZoom={camZoom}
-        setCamZoom={setCamZoom}
-      />
-
-      {/* ---------- logo (desktop) ---------- */}
-      <div className="pointer-events-none absolute left-1/2 top-2 z-20 hidden -translate-x-1/2 text-center md:block">
-        <span className="floaty absolute -left-9 top-1 hidden text-xl sm:block" style={{ animationDelay: "-1s" }}>🐾</span>
-        <span className="floaty absolute -right-9 top-3 hidden text-lg sm:block" style={{ animationDelay: "-2.2s" }}>⭐</span>
-        <span className="floaty absolute -bottom-3 left-6 hidden text-base sm:block" style={{ animationDelay: "-.5s" }}>🐟</span>
-        <h1 className="sticker wiggle text-5xl font-black italic leading-none tracking-tight text-yellow-300 md:text-6xl">MEOW BRAWL</h1>
-        <div className="mx-auto mt-1 flex w-max items-center gap-1.5 rounded-full border-2 border-white bg-white/90 px-3 py-0.5 text-[11px] font-black uppercase tracking-widest text-[#7a4a06] shadow-[0_3px_0_rgba(122,74,6,.25)]">
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 dot-pulse" />
-          Kucing meme saling gebuk · grab · lempar!
-          <span className="inline-block h-1.5 w-1.5 rounded-full bg-[#ff6f8f] dot-pulse" style={{ animationDelay: "-.9s" }} />
-        </div>
-      </div>
-
-      {/* ---------- top bar (desktop) ---------- */}
-      <div className="absolute inset-x-0 top-0 z-30 hidden items-start justify-between gap-2 p-3 md:flex">
-        {/* profile */}
-        <button
-          onClick={(e) => {
-            uiBtn(e);
-            setSheet("char");
-          }}
-          className="press flex items-center gap-2 rounded-2xl border-[3px] border-white bg-white/95 p-1.5 pr-3 shadow-[0_5px_0_rgba(60,90,140,.22)] backdrop-blur"
-        >
-          <span className="relative grid h-11 w-11 place-items-center overflow-hidden rounded-xl border-2 border-yellow-300" style={{ background: sel.ui }}>
-            <Portrait id={p1} fallback={sel.emoji} />
-            <span className="absolute -bottom-1 -right-1 grid h-5 w-5 place-items-center rounded-full border-2 border-white bg-gradient-to-b from-[#ffb3d4] to-[#ff6fab] text-[9px] font-black text-white shadow">1</span>
-          </span>
-          <span className="hidden text-left sm:block">
-            <span className="flex items-center gap-1.5 text-[13px] font-black leading-tight text-[#24364f]">
-              KAMU
-              <span className="rounded-full bg-gradient-to-b from-[#ffe45c] to-[#ffb200] px-1.5 py-px text-[9px] text-[#6b4100] shadow-[0_2px_0_#c98a00]">LV 12</span>
-            </span>
-            <span className="block max-w-[150px] truncate text-[10px] font-bold text-slate-500">{sel.name} · {sel.tagline}</span>
-            <span className="mt-0.5 block h-1.5 w-[130px] overflow-hidden rounded-full bg-slate-200">
-              <span className="block h-full w-3/4 rounded-full bg-gradient-to-r from-[#5fd65a] to-[#b9f5a8]" />
-            </span>
-          </span>
-        </button>
-
-        {/* currencies / quick stats */}
-        <div className="flex items-center gap-1.5">
-          <span className="hidden sm:contents">
-            <StatPill icon={<CatIcon />} value={`${ANIMALS.length}`} tone="pink" />
-            <StatPill icon={<BotIcon />} value={`${bots}`} tone="blue" />
-            <StatPill icon={<SwordsIcon />} value={`${fighters}`} tone="mint" />
-          </span>
-          <SettingsButton onClick={() => setSheet("settings")} />
-        </div>
-      </div>
-
-      {/* ---------- left rail (desktop) ---------- */}
-      <div className="absolute left-3 top-[44%] z-30 hidden -translate-y-1/2 rotate-[-1.5deg] flex-col gap-2.5 xl:flex">
-        <RailTab icon={<CatIcon />} label="KARAKTER" tone="mint" onClick={() => setSheet("char")} />
-        <RailTab icon={<HatIcon />} label="AKSESORIS" tone="pink" onClick={() => setSheet("acc")} />
-        <RailTab icon={<GearIcon />} label="ATUR BENTUK" tone="blue" onClick={() => setSheet("tuning")} />
-        <RailTab icon={<StarIcon />} label="MISI" tone="orange" badge={2} onClick={() => setSheet("mission")} />
-      </div>
-
-      {/* ---------- right rail (desktop) ---------- */}
-      <div className="absolute right-3 top-[44%] z-30 hidden -translate-y-1/2 rotate-[1.5deg] flex-col items-center gap-2.5 xl:flex">
-        <RoundBtn icon={<CatIcon />} label="Karakter" tone="pink" onClick={() => setSheet("char")} />
-        <RoundBtn icon={<PeopleIcon />} label="Bot & pemain" tone="blue" onClick={() => setSheet("settings")} />
-        <RoundBtn icon={<GearIcon />} label="Atur bentuk" tone="mint" onClick={() => setSheet("tuning")} />
-        <RoundBtn icon={<HelpIcon />} label="Cara main" tone="orange" onClick={() => setSheet("info")} />
-      </div>
-
-      {/* ---------- bottom deck (desktop) ---------- */}
-      <div className="absolute inset-x-0 bottom-0 z-30 hidden justify-center px-3 md:flex" style={{ paddingBottom: "calc(8px + env(safe-area-inset-bottom))" }}>
-        <div className="w-full max-w-[940px] rounded-[26px] border-4 border-white bg-[#fff8ee]/95 p-2 shadow-[0_10px_0_rgba(122,74,6,.18),0_18px_34px_rgba(50,70,120,.25)] backdrop-blur-md sm:p-3">
-          {/* accessory shelf */}
-          <div className="flex items-center gap-2">
-            <span className="hidden shrink-0 -rotate-3 rounded-lg bg-gradient-to-b from-[#ffb3d4] to-[#ff6fab] px-2 py-1 text-[9px] font-black uppercase tracking-wider text-white shadow-[0_3px_0_#c23c74] sm:block">
-              Aksesoris
-            </span>
-            <div className="no-sb flex flex-1 items-center gap-1.5 overflow-x-auto py-0.5">
-              {ACCESSORIES.map((a) => {
-                const on = acc1 === a.id;
-                return (
-                  <button
-                    key={a.id}
-                    onClick={(e) => {
-                      uiBtn(e);
-                      setAcc1(a.id);
-                    }}
-                    title={a.name}
-                    className={`press card-pop flex shrink-0 items-center gap-1.5 rounded-full border-[3px] px-2 py-1 text-[11px] font-black transition-all ${
-                      on
-                        ? "scale-105 border-yellow-300 bg-gradient-to-b from-[#ffe45c] to-[#ffc400] text-[#6b4100] shadow-[0_3px_0_#c98a00,0_0_0_3px_rgba(255,210,63,.35)]"
-                        : "border-white bg-white text-slate-500 shadow-[0_3px_0_rgba(0,0,0,.12)] hover:bg-yellow-50"
-                    }`}
-                  >
-                    <AccessoryIcon id={a.id} size={20} />
-                    <span className="hidden sm:inline">{a.name}</span>
-                    {on && <span className="text-[10px]">✔</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="mx-1 my-1.5 border-t-2 border-dashed border-[#f0c98a] sm:my-2" />
-
-          {/* character shelf */}
-          <div className="flex items-center gap-2">
-            <span className="hidden shrink-0 rotate-3 rounded-lg bg-gradient-to-b from-[#b9f5a8] to-[#5fd65a] px-2 py-1 text-[9px] font-black uppercase tracking-wider text-white shadow-[0_3px_0_#2f9b35] sm:block">
-              Kucing
-            </span>
-            <div className="no-sb flex flex-1 items-end gap-1.5 overflow-x-auto px-0.5 pb-1 pt-1 sm:gap-2">
-              {ANIMALS.map((a, i) => {
-                const on = p1 === a.id;
-                return (
-                  <button
-                    key={a.id}
-                    onClick={(e) => {
-                      uiBtn(e);
-                      setP1(a.id);
-                    }}
-                    title={`${a.name} — ${a.tagline}`}
-                    style={{ animationDelay: `${Math.min(i * 35, 350)}ms` }}
-                    className={`press card-pop relative grid h-[52px] w-[52px] shrink-0 place-items-center overflow-hidden rounded-2xl border-[3px] sm:h-[62px] sm:w-[62px] ${
-                      on
-                        ? "z-10 -translate-y-1 scale-110 border-yellow-300 shadow-[0_0_0_3px_rgba(255,210,63,.55),0_8px_14px_rgba(0,0,0,.22)]"
-                        : "border-white shadow-[0_4px_0_rgba(0,0,0,.14)] hover:-translate-y-0.5"
-                    }`}
-                  >
-                    <span className="absolute inset-0" style={{ background: `linear-gradient(180deg,${a.ui} 0%,${a.ui} 62%,rgba(0,0,0,.18) 100%)` }} />
-                    <span className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-white/35 to-transparent" />
-                    <span className="relative h-full w-full p-0.5">
-                      <Portrait id={a.id} fallback={a.emoji} />
-                    </span>
-                    <span className={`absolute inset-x-0 bottom-0 truncate px-1 py-px text-center text-[7px] font-black uppercase tracking-wide sm:text-[8px] ${on ? "bg-yellow-300/95 text-[#6b4100]" : "bg-black/35 text-white"}`}>
-                      {a.name}
-                    </span>
-                    {on && <span className="absolute right-0.5 top-0.5 text-[11px] drop-shadow">⭐</span>}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* action row */}
-          <div className="mt-1 flex items-stretch justify-center gap-1.5 sm:mt-1.5 sm:gap-2">
-            <div className="hidden flex-1 flex-col justify-end gap-1.5 md:flex">
-              <div className="flex gap-1.5">
-                <JuicyButton tone="blue" size="md" className="flex-1" onClick={() => setSheet("tuning")}>
-                  ATUR BENTUK
-                </JuicyButton>
-                <JuicyButton tone="orange" size="md" className="flex-1" onClick={() => setSheet("mission")}>
-                  MISI
-                </JuicyButton>
-              </div>
-              <div className="flex items-center gap-1.5 text-[10px] font-bold text-[#7a4a06]/80">
-                <span className="rounded-md bg-white px-1.5 py-0.5 shadow-sm">◀ ▶ pilih kucing</span>
-                <span className="rounded-md bg-white px-1.5 py-0.5 shadow-sm">ENTER untuk main</span>
-              </div>
-            </div>
-
-            <button
-              onClick={(e) => {
-                uiBtn(e);
-                setMode(mode === "brawl" ? "bomb" : "brawl");
-              }}
-              title="Ketuk untuk ganti mode"
-              className="press flex min-w-0 flex-[1.1] items-center gap-1.5 rounded-2xl border-[3px] border-white bg-gradient-to-b from-white to-[#fff1d6] px-1.5 py-1 text-left shadow-[0_5px_0_rgba(60,90,140,.2)] sm:gap-2 sm:px-2 sm:py-1.5 md:max-w-[430px]"
-            >
-              <span className={`relative grid h-9 w-9 shrink-0 place-items-center overflow-hidden rounded-xl shadow-[inset_0_-3px_0_rgba(0,0,0,.15)] sm:h-[52px] sm:w-[52px] ${mode === "bomb" ? "bg-gradient-to-b from-[#ff8f6b] to-[#e8343c]" : "bg-gradient-to-b from-[#ffe45c] to-[#ffb200]"}`}>
-                {mode === "bomb" ? <BombIcon /> : <IslandIcon />}
-                <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-emerald-400 dot-pulse" />
-              </span>
-              <div className="min-w-0 flex-1 text-left">
-                <div className="hidden text-[9px] font-black uppercase tracking-wider text-[#ff6f8f] sm:block">Mode · Arena Langit · 👆 ganti</div>
-                <div className="text-[13px] font-black leading-tight text-[#24364f] sm:truncate sm:text-lg">{mode === "bomb" ? "💣 LEMPAR BOM" : "BRAWL KUCING"}</div>
-                <div className="flex flex-wrap items-center gap-1 text-[9px] font-bold text-slate-500 sm:truncate sm:text-[10px]">
-                  <span className="rounded-full bg-emerald-100 px-1.5 py-px text-emerald-700">● {fighters}</span>
-                  <span className="rounded-full bg-sky-100 px-1.5 py-px text-sky-700">{twoPlayer ? "2P" : "1P"}</span>
-                  <span className="hidden rounded-full bg-pink-100 px-1.5 py-px text-pink-700 lg:inline">{ACCESSORIES.find((a) => a.id === acc1)?.name}</span>
-                </div>
-              </div>
-            </button>
-
-            <JuicyButton tone="yellow" size="xl" shine glow icon={<PlayIcon />} className="flex-[1.35] px-2 !text-xl sm:px-8 sm:!text-2xl md:max-w-[280px]" onClick={start}>
-              MAIN!
-            </JuicyButton>
-          </div>
-        </div>
-      </div>
-
+        </>
+      )}
+      {/* the page wipe stays mounted so it can cover the screen swap */}
+      <ScreenWipe handleRef={wipe} />
       {/* ---------- sheets ---------- */}
       {sheet === "char" && (
-        <Sheet title="Pilih Kucing" icon={<CatIcon />} onClose={() => setSheet(null)} footer={<JuicyButton tone="yellow" size="lg" block onClick={() => { setSheet(null); start(); }}>MAIN PAKAI {sel.name.toUpperCase()}!</JuicyButton>}>
+        <Sheet title="Pilih Kucing" icon={<CatIcon />} onClose={() => setSheet(null)} footer={<JuicyButton tone="yellow" size="lg" block onClick={() => setSheet(null)}>PILIH {sel.name.toUpperCase()}</JuicyButton>}>
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
             {ANIMALS.map((a) => {
               const on = p1 === a.id;
@@ -443,10 +204,64 @@ export default function App() {
         </Sheet>
       )}
 
+      {sheet === "eyes" && (
+        <Sheet title="Mata & Ekspresi" icon={<Eye size={22} />} onClose={() => setSheet(null)} footer={<JuicyButton tone="yellow" size="lg" block onClick={() => setSheet(null)}>SELESAI</JuicyButton>}>
+          <div className="eye-sheet">
+            <div className="eye-preview-wrap">
+              <EyePreview animal={p1} accessory={acc1} eyeStyle={eyes} expression={expression} />
+              <span className="eye-preview-label">{sel.name} · {EYE_STYLES.find(s => s.id === eyes)?.name} · {EXPRESSIONS.find(s => s.id === expression)?.name}</span>
+            </div>
+            <p className="eye-sheet-hint">Padukan mata dan ekspresi sesukamu. Gaya asli tetap jadi pilihan awal.</p>
+            <div className="face-tabs" role="group" aria-label="Kategori wajah">
+              <button type="button" aria-pressed={faceTab === "eyes"} onClick={() => setFaceTab("eyes")}><Eye size={16} /> Mata</button>
+              <button type="button" aria-pressed={faceTab === "expression"} onClick={() => setFaceTab("expression")}><Smile size={16} /> Ekspresi</button>
+            </div>
+            {faceTab === "eyes" ? (
+              <div className="eye-options" role="group" aria-label="Pilihan bentuk mata">
+                {EYE_STYLES.map(style => (
+                  <button type="button" key={style.id} aria-pressed={eyes === style.id} className={`eye-option ${eyes === style.id ? "is-selected" : ""}`} onClick={(e) => { uiBtn(e); setEyes(style.id); }}>
+                    <EyeSample style={style.id} />
+                    <span><strong>{style.name}</strong><small>{style.description}</small></span>
+                    {eyes === style.id && <span className="eye-check" aria-label="Dipilih">✓</span>}
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="eye-options" role="group" aria-label="Pilihan ekspresi">
+                {EXPRESSIONS.map(style => (
+                  <button type="button" key={style.id} aria-pressed={expression === style.id} className={`eye-option ${expression === style.id ? "is-selected" : ""}`} onClick={(e) => { uiBtn(e); setExpression(style.id); }}>
+                    <ExpressionSample style={style.id} />
+                    <span><strong>{style.name}</strong><small>{style.description}</small></span>
+                    {expression === style.id && <span className="eye-check" aria-label="Dipilih">✓</span>}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        </Sheet>
+      )}
+
       {sheet === "tuning" && (
         <Sheet title="Atur Bentuk Kucing" icon={<GearIcon />} onClose={() => setSheet(null)} footer={<JuicyButton tone="mint" size="lg" block onClick={() => setSheet(null)}>SELESAI</JuicyButton>}>
-          <div className="rounded-2xl bg-[#2c3550] p-1">
-            <TuningPanel inline />
+          <div className="shape-sheet">
+            <div className="shape-preview-wrap">
+              <EyePreview animal={p1} accessory={acc1} eyeStyle={eyes} expression={expression} framing="body" revision={tKey} />
+              <span className="shape-preview-label">{sel.name} · {shapeMode === "figure" ? "Figur Bulat" : "Bentuk Lama"}</span>
+            </div>
+            <p className="shape-hint">Pilih versi bentuk. Corak, mata, dan ekspresi tetap sama.</p>
+            <div className="shape-options" role="group" aria-label="Versi bentuk kucing">
+              <button type="button" aria-pressed={shapeMode === "classic"} className={shapeMode === "classic" ? "is-selected" : ""} onClick={(e) => { uiBtn(e); setShapeMode("classic"); }}>
+                <span className="shape-option-icon">◯</span><span><strong>Bentuk Lama</strong><small>Proporsi yang sekarang</small></span>{shapeMode === "classic" && <b>✓</b>}
+              </button>
+              <button type="button" aria-pressed={shapeMode === "figure"} className={shapeMode === "figure" ? "is-selected" : ""} onClick={(e) => { uiBtn(e); setShapeMode("figure"); }}>
+                <span className="shape-option-icon shape-option-figure">✦</span><span><strong>Figur Bulat</strong><small>Terinspirasi gambar 1</small></span>{shapeMode === "figure" && <b>✓</b>}
+              </button>
+            </div>
+            <p className="shape-note">Versi bentuk berlaku untuk semua kucing di menu dan pertandingan.</p>
+            <details className="shape-advanced">
+              <summary>Atur proporsi lebih lanjut</summary>
+              <TuningPanel inline />
+            </details>
           </div>
         </Sheet>
       )}
@@ -528,10 +343,10 @@ export default function App() {
             {[
               ["WSAD", "WASD / Panah", "Jalan ke segala arah. Tahan Shift untuk lari."],
               ["J", "J", "Pukul bergantian kiri-kanan. Pukulan beruntun bikin lawan pusing."],
-              ["E", "E", "Sekali tekan untuk angkat lawan/peti ke atas kepala, tekan lagi untuk melempar."],
-              ["K", "K", "Grab & bergantung di tepi arena. Lepas untuk lempar."],
+              ["E", "E", "Angkat / lempar. Dekati musuh bersenjata untuk rebut: tekan 3× cepat!"],
+              ["K", "K", "Angkat lawan ke atas kepala; tekan K lagi untuk melempar. K juga untuk bergantung di tepi arena."],
               ["BAT", "🏏 + J", "Ambil tongkat dengan E, ayun dengan J. Bisa memukul lawan & peti."],
-              ["L", "L", "Sundul (di darat) atau dropkick (di udara)."],
+              ["L", "L", "Lompat menerjang ke arah gerak; bisa dipakai di darat maupun udara."],
               ["KO", "Pingsan", "Kalau pusing penuh, kucing pingsan. Angkat dan lempar ke luar arena!"],
             ].map(([i, t, d]) => (
               <div key={t} className="flex gap-2 rounded-2xl bg-white p-2.5 shadow-[0_3px_0_rgba(0,0,0,.08)]">
@@ -542,7 +357,7 @@ export default function App() {
                 </div>
               </div>
             ))}
-            <div className="rounded-2xl bg-[#e9f6ff] p-3 text-[11px] font-bold text-[#083a66]">P2: panah · Num0/Enter lompat · Num1 pukul · Num2 grab · Num3 sundul · Num4 angkat · RShift lari.</div>
+            <div className="rounded-2xl bg-[#e9f6ff] p-3 text-[11px] font-bold text-[#083a66]">P2: panah · Num0/Enter lompat · Num1 pukul · Num2 angkat/lempar · Num3 terjang · Num4 angkat/rebut · RShift lari.</div>
           </div>
         </Sheet>
       )}
@@ -569,24 +384,21 @@ export default function App() {
           </div>
         </Sheet>
       )}
-    </div>
+    </>
   );
 }
 
 function AccessoryIcon({ id, size = 20 }: { id: AccessoryId; size?: number }) {
   if (id === "capRed" || id === "capBlue" || id === "capNewRed" || id === "capNewBlue") {
     const isRed = id === "capRed" || id === "capNewRed";
-    const isNew = id === "capNewRed" || id === "capNewBlue";
     const main = isRed ? "#e8343c" : "#2f6fe0";
     const dark = isRed ? "#a3121d" : "#1b4496";
     return (
       <Svg size={size}>
-        <path d="M4 13c0-4.5 3.5-8 8-8s8 3.5 8 8" fill={isNew ? "#f7f4ee" : main} stroke={dark} strokeWidth="1.8" strokeLinejoin="round" />
-        {isNew && <path d="M9 5.6C10.4 5 13.6 5 15 5.6L14.2 13H9.8L9 5.6Z" fill={main} stroke={dark} strokeWidth="1.2" strokeLinejoin="round" />}
+        <path d="M4 13c0-4.5 3.5-8 8-8s8 3.5 8 8" fill={main} stroke={dark} strokeWidth="1.8" strokeLinejoin="round" />
         <path d="M3 13h18" stroke={dark} strokeWidth="1.8" strokeLinecap="round" />
-        <path d="M15 13c2.6 0 5 .7 5 1.6S18.6 16 15 16" fill={isNew ? main : "#fff"} stroke={dark} strokeWidth="1.6" strokeLinejoin="round" />
-        <circle cx="12" cy="5.4" r="1.1" fill={isNew ? main : "#fff"} stroke={dark} strokeWidth="1.2" />
-        {isNew && <path d="m18.6 2.6.7 1.5 1.6.2-1.2 1.1.3 1.6-1.4-.8-1.4.8.3-1.6-1.2-1.1 1.6-.2.7-1.5Z" fill="#ffd23f" stroke="#a36a00" strokeWidth="0.7" strokeLinejoin="round" />}
+        <path d="M15 13c2.6 0 5 .7 5 1.6S18.6 16 15 16" fill={main} stroke={dark} strokeWidth="1.6" strokeLinejoin="round" />
+        <circle cx="12" cy="5.4" r="1.1" fill={main} stroke={dark} strokeWidth="1.2" />
       </Svg>
     );
   }
@@ -683,4 +495,20 @@ function IslandIcon() {
       <path d="M11 21V12l3-2 3 2v9" stroke="#fff" strokeWidth="2" strokeLinecap="round" />
     </Svg>
   );
+}
+
+function EyeSample({ style }: { style: EyeStyleId }) {
+  if (style === "default") return <span className="eye-sample eye-sample-default"><Cat size={24} /></span>;
+  return <span className={`eye-sample eye-sample-${style}`} aria-hidden="true"><svg viewBox="0 0 60 36" width="52" height="32">{[16, 44].map(x => <g key={x}>
+    <ellipse cx={x} cy="18" rx="11" ry="12" fill={style === "grumpy" ? "#83dfc9" : style === "green" ? "#141b1b" : style === "goofy" ? "#fff9f3" : "#ffd35c"} stroke="#2b2324" strokeWidth="2.5"/>
+    {style === "green" ? <><path d={`M${x-7} 20 Q${x-5} 29 ${x} 29 Q${x+6} 29 ${x+8} 20 Q${x+5} 26 ${x} 26 Q${x-4} 26 ${x-7} 20Z`} fill="#a8ec91"/><circle cx={x-2} cy="12" r="2" fill="white"/></> : <><ellipse cx={x} cy={style === "grumpy" ? 20 : 18} rx={style === "round" || style === "goofy" ? 7 : 3} ry={style === "grumpy" ? 7 : 9} fill="#252126"/>{(style === "round" || style === "goofy") && <circle cx={x-2.5} cy="13" r="2.2" fill="white"/>}</>}
+    {style === "grumpy" && <><path d={`M${x-12} 17 Q${x} 14 ${x+12} 17 L${x+12} 4 L${x-12} 4Z`} fill="#e1faf3"/><path d={`M${x-12} 17 Q${x} 14 ${x+12} 17`} fill="none" stroke="#2b2324" strokeWidth="3" strokeLinecap="round"/></>}
+  </g>)}</svg></span>;
+}
+function ExpressionSample({ style }: { style: ExpressionId }) {
+  if (style === "default") return <span className="eye-sample"><Cat size={24} /></span>;
+  return <span className="eye-sample" aria-hidden="true"><svg viewBox="0 0 48 40" width="44" height="38">
+    <path d="M20 10 Q24 16 28 10Z" fill="#d88388"/>
+    {style === "grumpy" ? <path d="M9 32 Q24 12 39 32" fill="none" stroke="#78504a" strokeWidth="3" strokeLinecap="round"/> : <><ellipse cx="24" cy="24" rx="13" ry="9" fill="#542d34"/><path d="M17 23 Q24 21 31 23 L31 31 Q30 38 24 38 Q18 38 17 31Z" fill="#ed8d9b" stroke="#a65b69" strokeWidth="1.5"/><path d="M24 26v6" stroke="#ba6876" strokeWidth="1.5" strokeLinecap="round"/></>}
+  </svg></span>;
 }

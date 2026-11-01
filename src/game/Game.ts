@@ -2,12 +2,17 @@ import * as CANNON from "cannon-es";
 import * as THREE from "three";
 import { ACCESSORIES, ANIMALS, BOT_NAMES, animalById, type AccessoryId, type AnimalDef, type AnimalId } from "./animals";
 import { Arena } from "./Arena";
+import { Seagull } from "./Seagull";
 import { BLAST_R, BombManager, type Bomb } from "./Bombs";
 import { Character, GRAVITY, bodyOwner, type Bat, type CharacterHooks } from "./Character";
 import { attachInput, detachInput, emptyControl, endFrameInput, readControls, type ControlState } from "./input";
 import { sfx } from "./audio";
 import * as rig from "./rig";
 import { getTuning } from "./tuning";
+import { qualityPixelRatio } from "./quality";
+import type { EyeStyleId, ExpressionId } from "./eyes";
+import { disposeCharacterDetails } from "./characterMesh";
+import { impactEffect, knockoutEffectColor } from "./impactEffects";
 const _ev = new THREE.Vector3();
 
 export interface GameOptions {
@@ -16,16 +21,21 @@ export interface GameOptions {
   p2Animal: AnimalId;
   p1Acc: AccessoryId;
   p2Acc: AccessoryId;
+  p1Eyes?: EyeStyleId;
+  p1Expression?: ExpressionId;
   bots: number;
   mode: "brawl" | "bomb";
   camMode: "stumble" | "gang";
   camZoom: number; // 0.7 dekat · 1 normal · 1.35 jauh
   onHud: (s: HudState) => void;
+  preparedRoster?: RosterEntry[];
 }
 
 export interface HudPlayer {
   id: number;
   animal: AnimalId;
+  eyeStyle: EyeStyleId;
+  expression: ExpressionId;
   name: string;
   emoji: string;
   color: string;
@@ -46,14 +56,17 @@ export interface HudState {
   players: HudPlayer[];
   feed: { id: number; text: string }[];
   banner: string | null;
-  winner: { name: string; emoji: string; human: boolean; animal: AnimalId | null } | null;
+  winner: { name: string; emoji: string; human: boolean; animal: AnimalId | null; eyeStyle: EyeStyleId; expression: ExpressionId } | null;
   meAlive: boolean;
   mode: "brawl" | "bomb";
   bombs: number;
+  weaponContest: { owner: string; challenger: string; ownerPresses: number; challengerPresses: number; p1: boolean; p2: boolean } | null;
 }
 
-interface RosterEntry {
+export interface RosterEntry {
   acc: AccessoryId;
+  eyeStyle: EyeStyleId;
+  expression: ExpressionId;
   def: AnimalDef;
   name: string;
   slot: 0 | 1 | 2;
@@ -78,6 +91,23 @@ interface Brain {
   fleeX: number;
   fleeZ: number;
   hadBomb: boolean;
+}
+
+/** Build once before loading so the worker prepares the same cats used by the match. */
+export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "p1Acc" | "p2Acc" | "p1Eyes" | "p1Expression" | "twoPlayer" | "bots">): RosterEntry[] {
+  const roster: RosterEntry[] = [{ def: animalById(opts.p1Animal), name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc, eyeStyle: opts.p1Eyes ?? "default", expression: opts.p1Expression ?? "default" }];
+  if (opts.twoPlayer) roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: "default", expression: "default" });
+  const used = new Set<AnimalId>(roster.map(r => r.def.id));
+  const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < opts.bots; i++) {
+    let pool = ANIMALS.filter(a => !used.has(a.id));
+    if (!pool.length) pool = ANIMALS;
+    const def = pool[Math.floor(Math.random() * pool.length)];
+    used.add(def.id);
+    const acc: AccessoryId = Math.random() < 0.7 ? ACCESSORIES[1 + Math.floor(Math.random() * (ACCESSORIES.length - 1))].id : "none";
+    roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: "default", expression: "default" });
+  }
+  return roster;
 }
 
 const wrapAngle = (a: number) => {
@@ -126,6 +156,7 @@ export class Game {
   phase: HudState["phase"] = "countdown";
   countdown = 3.5;
   timeLeft = ROUND_TIME;
+  private seagull: Seagull | null = null;
   round = 0;
   feed: { id: number; text: string; t: number }[] = [];
   feedId = 0;
@@ -151,11 +182,8 @@ export class Game {
   events = { sweeper: false, ring3: false, ring2: false, ring1: false };
   resizeObs: ResizeObserver;
   disposed = false;
-  hitStop = 0;
   tearT = 0;
   batOf = new Map<CANNON.Body, Bat>();
-  words: { sp: THREE.Sprite; life: number; vy: number; base: number }[] = [];
-  wordTex: Record<string, THREE.CanvasTexture> = {};
   bombs: BombManager | null = null;
   // adaptive quality (keeps FPS ultra smooth on weak devices)
   qLevel = 0;
@@ -212,7 +240,11 @@ export class Game {
 
     // physics
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -GRAVITY, 0) });
-    this.world.broadphase = new CANNON.SAPBroadphase(this.world);
+    const broadphase = new CANNON.SAPBroadphase(this.world);
+    // Long, thin plane sections have huge bounding spheres. AABB checks avoid
+    // sending distant characters and props through the expensive narrow phase.
+    broadphase.useBoundingBoxes = true;
+    this.world.broadphase = broadphase;
     (this.world.solver as CANNON.GSSolver).iterations = 10;
     this.world.allowSleep = false;
     this.world.defaultContactMaterial.friction = 0.3;
@@ -222,42 +254,11 @@ export class Game {
     this.world.addContactMaterial(new CANNON.ContactMaterial(cm, cm, { friction: 0.35, restitution: 0.15 }));
     this.world.addContactMaterial(new CANNON.ContactMaterial(this.groundMat, this.groundMat, { friction: 0.4, restitution: 0.2 }));
 
-    // roster
-    this.roster.push({ def: animalById(opts.p1Animal), name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc });
-    if (opts.twoPlayer) this.roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc });
-    const used = new Set<AnimalId>(this.roster.map((r) => r.def.id));
-    const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
-    for (let i = 0; i < opts.bots; i++) {
-      let pool = ANIMALS.filter((a) => !used.has(a.id));
-      if (pool.length === 0) pool = ANIMALS;
-      const def = pool[Math.floor(Math.random() * pool.length)];
-      used.add(def.id);
-      const acc: AccessoryId = Math.random() < 0.7 ? ACCESSORIES[1 + Math.floor(Math.random() * (ACCESSORIES.length - 1))].id : "none";
-      this.roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc });
-    }
+    // The roster can be prepared by the loading worker before WebGL starts.
+    this.roster.push(...(opts.preparedRoster ?? createRoster(opts)));
 
     // particles pool
     const pg = new THREE.SphereGeometry(1, 8, 6);
-    for (const [w, fill] of [
-      ["POW!", "#ffd23f"],
-      ["BAM!", "#ff7a59"],
-      ["BONK!", "#7cf0ff"],
-      ["WHAM!", "#ff8fd8"],
-      ["BUGH!", "#b6ff6b"],
-      ["WUSH!", "#ffffff"],
-      ["TONK!", "#ffe14d"],
-      ["KLONTANG!", "#ff9ecf"],
-      ["BOOM!", "#ff5a3c"],
-      ["KABOOM!", "#ffb43c"],
-      ["DUAR!", "#ff8fd8"],
-    ]) this.wordTex[w] = comicTexture(w, fill);
-    for (let i = 0; i < 10; i++) {
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
-      sp.visible = false;
-      sp.renderOrder = 20;
-      this.scene.add(sp);
-      this.words.push({ sp, life: 0, vy: 0, base: 1 });
-    }
     // single instanced draw call for ALL particles (was 110 meshes + 110 materials)
     this.pMesh = new THREE.InstancedMesh(
       pg,
@@ -265,6 +266,7 @@ export class Game {
       P_COUNT
     );
     this.pMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.pMesh.visible = false;
     this.pMesh.frustumCulled = false;
     _pm.makeScale(0, 0, 0);
     for (let i = 0; i < P_COUNT; i++) {
@@ -293,7 +295,7 @@ export class Game {
 
   /** auto quality: drop pixel ratio / shadow res when FPS sags, restore when smooth */
   private applyQuality() {
-    const pr = [this.qBasePR, Math.min(this.qBasePR, 1.5), 1.25, 1.0][this.qLevel];
+    const pr = qualityPixelRatio(this.qBasePR, this.qLevel);
     const sh = this.qLevel < 2 ? 1024 : 512;
     this.renderer.setPixelRatio(pr);
     const sm = this.sun?.shadow;
@@ -306,7 +308,9 @@ export class Game {
   }
 
   private autoQuality(rawDt: number) {
-    if (rawDt <= 0) return;
+    // Ignore tab suspension / very long startup stalls, but still react to
+    // genuinely slow frames on lower-end devices.
+    if (rawDt <= 0 || rawDt > 2 || document.hidden) return;
     const fps = 1 / rawDt;
     this.fpsEMA += (Math.min(fps, 120) - this.fpsEMA) * 0.04;
     this.qTimer += rawDt;
@@ -332,21 +336,17 @@ export class Game {
     onHit: (attacker, victim, point, dmg, kind) => {
       const big = kind !== "punch";
       const pan = kind === "pan";
-      this.burst(point.x, point.y, point.z, big ? 14 : 7, pan ? 0xffe9a6 : big ? 0xffe066 : 0xffffff, big ? 0.22 : 0.15, big ? 1.4 : 1);
+      const effect = impactEffect(kind);
+      this.burst(point.x, point.y, point.z, effect.count, effect.color, effect.size, effect.speed);
       if (pan) sfx.pan();
       else if (big) sfx.bigHit();
       else sfx.hit(Math.min(1.2, dmg / 15));
-      const word = kind === "pan" ? "PANG!" : kind === "bat" ? "BONK!" : kind === "throw" ? "WHAM!" : kind === "dropkick" ? "BAM!" : kind === "headbutt" ? "BUGH!" : Math.random() < 0.5 ? "POW!" : "BAM!";
-      const w2 = victim.accKind === "helmet" && Math.random() < 0.6 ? "TONK!" : word;
-      if (big || Math.random() < 0.6) this.comic(w2, point.x, point.y, point.z, big ? 1.25 : 0.85);
-      // hit-stop: freeze-frame that makes every hit feel crunchy
-      this.hitStop = Math.max(this.hitStop, kind === "bat" ? 0.11 : pan ? 0.075 : big ? 0.08 : 0.045);
-      if (attacker.isHuman || victim.isHuman) this.shake = Math.max(this.shake, kind === "bat" ? 0.5 : pan ? 0.26 : big ? 0.35 : 0.16);
+      if (attacker.isHuman || victim.isHuman) this.shake = Math.max(this.shake, kind === "bat" ? 0.5 : pan ? 0.26 : big ? 0.35 : 0.22);
     },
     onKO: (victim) => {
       this.pushFeed(`${victim.def.emoji} ${victim.name} pingsan! 💫`);
       const p = victim.head.position;
-      this.burst(p.x, p.y + 0.4, p.z, 8, 0xffd93d, 0.12);
+      this.burst(p.x, p.y + 0.4, p.z, 8, knockoutEffectColor(victim.lastHitKind), 0.12);
     },
     onLand: (c, k) => {
       const p = c.position;
@@ -363,17 +363,32 @@ export class Game {
     for (const c of this.chars) {
       c.removeFromWorld();
       this.scene.remove(c.root);
+      disposeCharacterDetails([c.root]);
+      c.nameTag.material.map?.dispose();
+      c.nameTag.material.dispose();
     }
+    this.seagull?.dispose();
+    this.seagull = null;
     this.arena?.dispose();
     this.bombs?.dispose();
     this.bombs = null;
     // clear lingering constraints/bodies
     for (const con of [...this.world.constraints]) this.world.removeConstraint(con);
     for (const b of [...this.world.bodies]) this.world.removeBody(b);
-    for (const l of Character.loose) l.mesh.removeFromParent();
+    for (const l of Character.loose) {
+      l.mesh.removeFromParent();
+      disposeCharacterDetails([l.mesh]);
+    }
     Character.loose = [];
+    Character.thrownProps = [];
 
     this.arena = new Arena(this.world, this.scene, this.groundMat);
+    this.seagull = new Seagull(this.scene, z => this.arena!.surfaceHeight(z), (_cat, x, y, z) => {
+      this.burst(x, y, z, 10, 0xf6f5ed, 0.13, 0.8, 0.8);
+      this.burst(x, y, z, 6, 0xffdd87, 0.1, 0.65, 0.8);
+      sfx.hit(0.8);
+      this.shake = Math.max(this.shake, 0.15);
+    }, () => sfx.seagull());
     if (this.opts.mode === "bomb") {
       this.bombs = new BombManager(this.world, this.scene, this.groundMat, {
         onExplode: (pos, thrower) => this.onBombExplode(pos, thrower),
@@ -396,8 +411,9 @@ export class Game {
         const s = this.arena!.randomSafePoint(0.5);
         pos.set(s.x, 0.05, s.z);
       }
+      pos.y = this.arena!.surfaceHeight(pos.z) + 0.05;
       const yaw = Math.atan2(-pos.x, -pos.z);
-      const c = new Character(this.world, i, r.def, r.name, r.slot, this.hooks, pos, yaw, emptyControl(), r.acc);
+      const c = new Character(this.world, i, r.def, r.name, r.slot, this.hooks, pos, yaw, emptyControl(), r.acc, r.eyeStyle, r.expression);
       c.wins = r.wins;
       this.scene.add(c.root);
       this.chars.push(c);
@@ -443,6 +459,15 @@ export class Game {
     if (this.phase === "roundEnd") this.startRound();
   }
 
+  /** Start the whole match over: round 1, scores cleared, same players/settings. */
+  restart() {
+    if (this.disposed) return;
+    this.round = 0;
+    for (const r of this.roster) r.wins = 0;
+    this.startRound();
+    this.setBanner("ULANG PERTANDINGAN!");
+  }
+
   pushFeed(text: string) {
     this.feed.push({ id: this.feedId++, text, t: 5 });
     if (this.feed.length > 5) this.feed.shift();
@@ -451,31 +476,14 @@ export class Game {
     this.banner = { text, t: 2.2 };
   }
 
-  comic(word: string, x: number, y: number, z: number, size = 1) {
-    const w = this.words.find((q) => q.life <= 0) ?? this.words[0];
-    const m = w.sp.material as THREE.SpriteMaterial;
-    m.map = this.wordTex[word];
-    m.rotation = (Math.random() - 0.5) * 0.5;
-    m.opacity = 1;
-    m.needsUpdate = true;
-    w.sp.position.set(x, y + 0.5, z);
-    w.life = 0.7;
-    w.vy = 1.4;
-    w.base = size;
-    w.sp.visible = true;
-  }
-
   /** Big cartoon explosion: flings EVERYONE in radius, credits the thrower. */
   onBombExplode(pos: THREE.Vector3, thrower: Character | null) {
-    // presentation: flash + fire + smoke + comic word
+    // presentation: flash + fire + smoke
     this.burst(pos.x, pos.y, pos.z, 26, 0xfff3c4, 0.5, 2.4, 1.2);
     this.burst(pos.x, pos.y, pos.z, 22, 0xff9a3c, 0.42, 1.9, 1.0);
     this.burst(pos.x, pos.y, pos.z, 16, 0xff4d3c, 0.36, 1.5, 1.4);
     this.burst(pos.x, pos.y + 0.6, pos.z, 10, 0x555566, 0.5, 0.7, 2.0);
-    const word = Math.random() < 0.45 ? "BOOM!" : Math.random() < 0.5 ? "KABOOM!" : "DUAR!";
-    this.comic(word, pos.x, pos.y, pos.z, 1.8);
     sfx.explode();
-    this.hitStop = Math.max(this.hitStop, 0.16);
     if (this.chars.some((c) => c.isHuman && c.alive)) this.shake = Math.max(this.shake, 0.9);
     // gameplay: radial fling, hurts + credits like a super-throw
     const R = BLAST_R + 0.8;
@@ -489,7 +497,7 @@ export class Game {
       const fall = 1 - d / R;
       const l = d || 1;
       const dir = new CANNON.Vec3(dx / l, 0, dz / l);
-      c.releaseAll(false); // blast knocks everything out of everyone's hands
+      c.releaseAll(false); // blast releases grabbed cats and props, not an equipped weapon
       const power = 7 + 13 * fall;
       c.torso.velocity.x += dir.x * power;
       c.torso.velocity.z += dir.z * power;
@@ -537,7 +545,9 @@ export class Game {
   }
 
   burst(x: number, y: number, z: number, count: number, color: number, size: number, speed = 1, up = 1) {
+    if (count <= 0) return;
     let spawned = 0;
+    _pc.setHex(color);
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
       if (p.life > 0) continue;
@@ -545,10 +555,36 @@ export class Game {
       p.pos.set(x, y, z);
       p.vel.set((Math.random() - 0.5) * 6 * speed, (Math.random() * 4 + 1) * up, (Math.random() - 0.5) * 6 * speed);
       p.grow = size * (0.6 + Math.random() * 0.8);
-      this.pMesh?.setColorAt(i, _pc.setHex(color));
+      this.pMesh?.setColorAt(i, _pc);
       if (++spawned >= count) break;
     }
-    if (this.pMesh?.instanceColor) this.pMesh.instanceColor.needsUpdate = true;
+    if (spawned && this.pMesh) {
+      this.pMesh.visible = true;
+      if (this.pMesh.instanceColor) this.pMesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  /** Update only live particles; do not upload or draw the idle pool. */
+  private updateParticles(dt: number) {
+    if (!this.pMesh?.visible) return;
+    let changed = false, live = false;
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      if (p.life <= 0) continue;
+      changed = true;
+      p.life -= dt;
+      p.vel.y -= 12 * dt;
+      p.pos.addScaledVector(p.vel, dt);
+      const k = Math.max(0, p.life / p.max);
+      _ps.setScalar(p.life <= 0 ? 0.0001 : p.grow * (0.15 + 0.85 * k * k));
+      _pm.compose(p.pos, _pq.identity(), _ps);
+      this.pMesh?.setMatrixAt(i, _pm);
+      if (p.life > 0) live = true;
+    }
+    if (this.pMesh) {
+      this.pMesh.visible = live;
+      if (changed) this.pMesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   // ---------------- BOT AI ----------------
@@ -556,7 +592,15 @@ export class Game {
     const s = emptyControl();
     const b = this.brains.get(c)!;
     const arena = this.arena!;
-    if (!c.alive || c.ko) return s;
+    if (!c.alive || c.down) return s;
+    if (c.weaponContest) {
+      c.contestBotDelay -= dt;
+      if (c.contestBotDelay <= 0) {
+        s.lift = true;
+        c.contestBotDelay = 0.43 + Math.random() * 0.22;
+      }
+      return s;
+    }
     const pos = c.position;
     const toCenter = () => {
       const l = Math.hypot(pos.x, pos.z) || 1;
@@ -871,6 +915,10 @@ export class Game {
       s.mz = dz / dl;
       s.run = b.runFlag && dist > 3;
       if (dist < 1.7) {
+        if (!c.weapon && t.weapon && !t.down && !c.holding && c.contestCooldown <= 0 && Math.random() < 0.005) {
+          s.lift = true;
+          return s;
+        }
         // in melee range
         s.mx *= 0.35;
         s.mz *= 0.35;
@@ -1025,7 +1073,7 @@ export class Game {
       for (const h of [c.holds.armL, c.holds.armR])
         if (h?.owner) {
           h.owner.heldBy++;
-          if (c.lifting && h.carry && !h.owner.ko) h.owner.carriedBy = c;
+          if (c.lifting && h.carry) h.owner.carriedBy = c;
         }
     for (const c of this.chars) c.updateCollisionMask();
     // thrown props cool down
@@ -1050,10 +1098,11 @@ export class Game {
     for (const c of this.chars) if (!c.removed) c.frameActions(dt);
 
     // physics
-    if (this.hitStop > 0) this.hitStop -= dt;
-    this.acc += this.hitStop > 0 ? dt * 0.06 : dt;
+    // Hits use particles, sound and camera shake, not a physics freeze.
+    this.acc += dt;
     let steps = 0;
     while (this.acc >= H && steps < 6) {
+      this.seagull?.update(H, this.chars, this.phase === "playing", this.camYaw);
       for (const c of this.chars) c.physicsStep(H);
       this.world.step(H);
       for (const con of this.world.contacts) {
@@ -1068,9 +1117,9 @@ export class Game {
             const v = bat.body.velocity;
             const l = Math.hypot(v.x, v.z) || 1;
             const pan = bat.kind === "pan";
-            victim.receiveHit(bat.thrower, pan ? 20 : 32, _hitDir.set(v.x / l, 0, v.z / l), pan ? 5 : 8, vb);
+            victim.receiveHit(bat.thrower, pan ? 20 : 32, _hitDir.set(v.x / l, 0, v.z / l), pan ? 5 : 8, vb, undefined, pan ? "pan" : "bat");
             victim.capKnockback(6, 3.2);
-            this.hooks.onHit(bat.thrower, victim, _hitPos.copy(vb.position), pan ? 20 : 32, pan ? "pan" : "throw");
+            this.hooks.onHit(bat.thrower, victim, _hitPos.copy(vb.position), pan ? 20 : 32, pan ? "pan" : "bat");
           }
         }
         if (a && b && a.char !== b.char) {
@@ -1166,8 +1215,8 @@ export class Game {
           const r = this.roster[w.index];
           r.wins++;
           w.wins = r.wins;
-          this.winner = { name: w.name, emoji: w.def.emoji, human: w.isHuman, animal: w.def.id };
-        } else this.winner = { name: "Seri", emoji: "🤝", human: false, animal: null };
+          this.winner = { name: w.name, emoji: w.def.emoji, human: w.isHuman, animal: w.def.id, eyeStyle: this.roster[w.index].eyeStyle, expression: this.roster[w.index].expression };
+        } else this.winner = { name: "Seri", emoji: "🤝", human: false, animal: null, eyeStyle: "default", expression: "default" };
         sfx.win();
         this.emitHud();
       }
@@ -1175,31 +1224,8 @@ export class Game {
 
     // visuals
     for (const c of this.chars) if (!c.removed) c.syncVisual();
-    // particles fade by shrinking (per-instance alpha isn't a thing — 1 draw call total)
-    for (let i = 0; i < this.particles.length; i++) {
-      const p = this.particles[i];
-      if (p.life <= 0) continue;
-      p.life -= dt;
-      p.vel.y -= 12 * dt;
-      p.pos.addScaledVector(p.vel, dt);
-      const k = Math.max(0, p.life / p.max);
-      _ps.setScalar(p.life <= 0 ? 0.0001 : p.grow * (0.15 + 0.85 * k * k));
-      _pm.compose(p.pos, _pq.identity(), _ps);
-      this.pMesh?.setMatrixAt(i, _pm);
-    }
-    if (this.pMesh) this.pMesh.instanceMatrix.needsUpdate = true;
+    this.updateParticles(dt);
 
-    for (const w of this.words) {
-      if (w.life <= 0) continue;
-      w.life -= dt;
-      const k = 1 - w.life / 0.7;
-      const pop = k < 0.15 ? (k / 0.15) * 1.25 : 1.25 - Math.min(0.25, (k - 0.15) * 0.6);
-      w.sp.scale.set(1.6 * w.base * pop, 0.8 * w.base * pop, 1);
-      w.sp.position.y += w.vy * dt;
-      w.vy *= 0.9;
-      (w.sp.material as THREE.SpriteMaterial).opacity = Math.min(1, w.life / 0.25);
-      if (w.life <= 0) w.sp.visible = false;
-    }
     for (const l of Character.loose) {
       l.mesh.position.set(l.body.position.x, l.body.position.y, l.body.position.z);
       l.mesh.quaternion.set(l.body.quaternion.x, l.body.quaternion.y, l.body.quaternion.z, l.body.quaternion.w);
@@ -1294,6 +1320,7 @@ export class Game {
 
   emitHud() {
     const me = this.chars.find((c) => c.humanSlot === 1);
+    const contest = this.chars.find(c => c.isHuman && c.weaponContest)?.weaponContest;
     this.opts.onHud({
       phase: this.phase,
       countdown: Math.max(0, Math.ceil(this.countdown)),
@@ -1304,6 +1331,8 @@ export class Game {
       players: this.chars.map((c) => ({
         id: c.index,
         animal: c.def.id,
+        eyeStyle: this.roster[c.index].eyeStyle,
+        expression: this.roster[c.index].expression,
         name: c.name,
         emoji: c.def.emoji,
         color: c.def.ui,
@@ -1319,6 +1348,12 @@ export class Game {
       meAlive: !!me?.alive,
       mode: this.opts.mode,
       bombs: this.bombs?.live.length ?? 0,
+      weaponContest: contest ? {
+        owner: contest.owner.name, challenger: contest.challenger.name,
+        ownerPresses: contest.ownerPresses, challengerPresses: contest.challengerPresses,
+        p1: contest.owner.humanSlot === 1 || contest.challenger.humanSlot === 1,
+        p2: contest.owner.humanSlot === 2 || contest.challenger.humanSlot === 2,
+      } : null,
     });
   }
 
@@ -1327,6 +1362,24 @@ export class Game {
     cancelAnimationFrame(this.raf);
     this.resizeObs.disconnect();
     detachInput();
+    for (const c of this.chars) {
+      c.removeFromWorld();
+      disposeCharacterDetails([c.root]);
+      c.nameTag.material.map?.dispose();
+      c.nameTag.material.dispose();
+    }
+    for (const l of Character.loose) disposeCharacterDetails([l.mesh]);
+    this.chars = [];
+    Character.all = [];
+    Character.loose = [];
+    Character.thrownProps = [];
+    this.seagull?.dispose();
+    this.seagull = null;
+    this.arena?.dispose();
+    this.bombs?.dispose();
+    this.pMesh?.geometry.dispose();
+    (this.pMesh?.material as THREE.Material | undefined)?.dispose();
+    if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -1344,38 +1397,6 @@ function skyTexture() {
   grd.addColorStop(1, "#fff1dc");
   g.fillStyle = grd;
   g.fillRect(0, 0, 4, 256);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
-function comicTexture(word: string, fill: string) {
-  const c = document.createElement("canvas");
-  c.width = 256;
-  c.height = 128;
-  const g = c.getContext("2d")!;
-  // spiky burst
-  g.translate(128, 64);
-  g.beginPath();
-  for (let i = 0; i < 24; i++) {
-    const a = (i / 24) * Math.PI * 2;
-    const r = i % 2 ? 46 : 62;
-    g.lineTo(Math.cos(a) * r * 1.85, Math.sin(a) * r);
-  }
-  g.closePath();
-  g.fillStyle = "#ffffff";
-  g.fill();
-  g.lineWidth = 5;
-  g.strokeStyle = "#2b1d3a";
-  g.stroke();
-  g.font = "900 54px 'Nunito', system-ui, sans-serif";
-  g.textAlign = "center";
-  g.textBaseline = "middle";
-  g.lineWidth = 10;
-  g.strokeStyle = "#2b1d3a";
-  g.strokeText(word, 0, 4);
-  g.fillStyle = fill;
-  g.fillText(word, 0, 4);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;

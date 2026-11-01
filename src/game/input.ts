@@ -6,6 +6,7 @@ export interface ControlState {
   punch: boolean; // edge
   punchHeld: boolean;
   grab: boolean; // held
+  grabPress: boolean; // edge: grab -> hoist overhead -> throw
   headbutt: boolean; // edge
   lift: boolean; // edge: pick up / lift / throw
 }
@@ -18,6 +19,7 @@ export const emptyControl = (): ControlState => ({
   punch: false,
   punchHeld: false,
   grab: false,
+  grabPress: false,
   headbutt: false,
   lift: false,
 });
@@ -34,6 +36,7 @@ export const touch = {
   punch: false,
   punchHeld: false,
   grab: false,
+  grabPress: false,
   headbutt: false,
   lift: false,
 };
@@ -108,6 +111,7 @@ export function readControls(player: 1 | 2, twoPlayer: boolean): ControlState {
     s.punch = e("KeyJ");
     s.punchHeld = k("KeyJ");
     s.grab = k("KeyK");
+    s.grabPress = e("KeyK");
     s.headbutt = e("KeyL");
     s.lift = e("KeyE");
     if (touch.active) {
@@ -120,6 +124,7 @@ export function readControls(player: 1 | 2, twoPlayer: boolean): ControlState {
       s.punch = s.punch || touch.punch;
       s.punchHeld = s.punchHeld || touch.punchHeld;
       s.grab = s.grab || touch.grab;
+      s.grabPress = s.grabPress || touch.grabPress;
       s.headbutt = s.headbutt || touch.headbutt;
       s.lift = s.lift || touch.lift;
     }
@@ -131,6 +136,7 @@ export function readControls(player: 1 | 2, twoPlayer: boolean): ControlState {
     s.punch = e("Numpad1", "Comma");
     s.punchHeld = k("Numpad1") || k("Comma");
     s.grab = k("Numpad2") || k("Period");
+    s.grabPress = e("Numpad2", "Period");
     s.headbutt = e("Numpad3", "Slash");
     s.lift = e("Numpad4", "Semicolon");
   }
@@ -146,6 +152,7 @@ export function endFrameInput() {
   pressedEdge.clear();
   touch.jump = false;
   touch.punch = false;
+  touch.grabPress = false;
   touch.headbutt = false;
   touch.lift = false;
 }

@@ -1,20 +1,23 @@
 import * as THREE from "three";
 import { MarchingCubes } from "three/examples/jsm/objects/MarchingCubes.js";
-import { mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
+import { mergeGeometries, mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import type { AccessoryId, AnimalDef, AnimalId } from "./animals";
+import type { EyeStyleId, ExpressionId } from "./eyes";
 import * as rig from "./rig";
 import type { V3 } from "./rig";
-import { getTuning, tuningKey, TUNING_DEFAULTS, type Tuning } from "./tuning";
+import { getRigTuning, getShapeMode, tuningKey, TUNING_DEFAULTS, type Tuning } from "./tuning";
 
 /* =====================================================================
  *  Shared material helper (used by the arena too)
  * ===================================================================== */
+const sharedMaterials = new WeakSet<THREE.Material>();
 const matCache = new Map<number, THREE.MeshStandardMaterial>();
 export function mat(color: number, rough = 0.85) {
   const key = color * 10 + Math.round(rough * 9);
   let m = matCache.get(key);
   if (!m) {
     m = new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: 0 });
+    sharedMaterials.add(m);
     matCache.set(key, m);
   }
   return m;
@@ -68,7 +71,7 @@ const ty = (y: number) => y * BH;
 /** head scale: big meme-cat head on a tiny body */
 export let HS = 0.745;
 let TU: Tuning = TUNING_DEFAULTS;
-/** build the body without ears (they're tucked inside the helmet) */
+/** Build the head without ears when they are covered by a cap or helmet. */
 let NO_EARS = false;
 /** arm-local y stretched by the arm length tuning (pivot at LIMB_TOP stays fixed) */
 const AY = (y: number) => rig.LIMB_TOP[1] + (y - rig.LIMB_TOP[1]) * TU.armLen;
@@ -76,6 +79,9 @@ const AY = (y: number) => rig.LIMB_TOP[1] + (y - rig.LIMB_TOP[1]) * TU.armLen;
 const PAW = () => AY(-0.205);
 /** leg-local y stretched by the leg length tuning (hip pivot fixed) */
 const LY = (y: number) => rig.LIMB_TOP[1] + (y - rig.LIMB_TOP[1]) * TU.legH;
+/** Keep the existing sock and toe markings attached to the reshaped feet. */
+const figureFootOffset = () => getShapeMode() === "figure" ? 0.1 * (0.7 + 0.3 * TU.legTip) * 0.22 + 0.035 : 0;
+
 /** head-local point -> bind space */
 const hd = (x: number, y: number, z: number): V3 => [x * HS, y * HS + HO, z * HS];
 const hr = (x: number, y: number, z: number): V3 => [x * HS, y * HS, z * HS];
@@ -84,7 +90,7 @@ const hr = (x: number, y: number, z: number): V3 => [x * HS, y * HS, z * HS];
  *  Signed distance primitives
  * ===================================================================== */
 interface Shape {
-  t: 0 | 1 | 2; // ellipsoid | round cone | slab
+  t: 0 | 1 | 2 | 3 | 4; // ellipsoid | round cone | slab | curved tail | rounded box
   part: number;
   k: number; // smooth-union radius
   col: THREE.Color;
@@ -106,6 +112,7 @@ interface Shape {
   bc: V3;
   noBounds?: boolean;
   br: number;
+  path?: { a: V3; d: V3; invLength2: number; radius: number; radiusDelta: number }[];
 }
 interface Paint {
   s: Shape;
@@ -131,6 +138,17 @@ function ell(part: PartName, c: V3, r: V3, k = 0, col = 0, cs = 0.02): Shape {
   s.br = Math.max(r[0], r[1], r[2]);
   return s;
 }
+/** Rounded box with half-extents; useful for a softly sculpted, flat-soled paw. */
+function roundBox(part: PartName, c: V3, r: V3, radius: number, k = 0): Shape {
+  const s = blank(part, k, 0, 0.02);
+  s.t = 4;
+  s.c = c;
+  s.r = r;
+  s.ra = radius;
+  s.bc = c;
+  s.br = Math.hypot(...r);
+  return s;
+}
 function cone(part: PartName, a: V3, b: V3, ra: number, rb: number, k = 0, col = 0, sq = 1, cs = 0.02): Shape {
   const s = blank(part, k, col, cs);
   const ba: V3 = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
@@ -148,6 +166,25 @@ function cone(part: PartName, a: V3, b: V3, ra: number, rb: number, k = 0, col =
   s.sq = sq;
   s.bc = [(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2];
   s.br = Math.sqrt(l2) / 2 + Math.max(ra, rb);
+  return s;
+}
+/** A single continuous, gently tapered tube along the tail's curved centreline. */
+function tailTube(points: V3[], radii: number[], k = 0): Shape {
+  const s = blank("torso", k, 0, 0.02);
+  s.t = 3;
+  s.path = [];
+  const min = [Infinity, Infinity, Infinity], max = [-Infinity, -Infinity, -Infinity];
+  for (const p of points) for (let j = 0; j < 3; j++) { min[j] = Math.min(min[j], p[j]); max[j] = Math.max(max[j], p[j]); }
+  s.bc = [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2];
+  s.br = 0;
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    s.br = Math.max(s.br, Math.hypot(p[0] - s.bc[0], p[1] - s.bc[1], p[2] - s.bc[2]) + radii[i]);
+    if (i + 1 === points.length) continue;
+    const next = points[i + 1];
+    const d: V3 = [next[0] - p[0], next[1] - p[1], next[2] - p[2]];
+    s.path.push({ a: p, d, invLength2: 1 / Math.max(1e-9, d[0] ** 2 + d[1] ** 2 + d[2] ** 2), radius: radii[i], radiusDelta: radii[i + 1] - radii[i] });
+  }
   return s;
 }
 function slab(c: V3, n: V3, th: number, R: number): Shape {
@@ -170,6 +207,24 @@ function shapeDist(s: Shape, x: number, y: number, z: number): number {
     const k1 = Math.sqrt(qx * qx + qy * qy + qz * qz);
     if (k1 < 1e-9) return -Math.min(s.r[0], s.r[1], s.r[2]);
     return (k0 * (k0 - 1)) / k1;
+  }
+  if (s.t === 4) {
+    const radius = s.ra;
+    const qx = Math.abs(x - s.c[0]) - s.r[0] + radius;
+    const qy = Math.abs(y - s.c[1]) - s.r[1] + radius;
+    const qz = Math.abs(z - s.c[2]) - s.r[2] + radius;
+    return Math.hypot(Math.max(qx, 0), Math.max(qy, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qy, qz), 0) - radius;
+  }
+  if (s.t === 3) {
+    let closest = Infinity, radius = 0;
+    for (const segment of s.path!) {
+      const dx = x - segment.a[0], dy = y - segment.a[1], dz = z - segment.a[2];
+      const t = Math.max(0, Math.min(1, (dx * segment.d[0] + dy * segment.d[1] + dz * segment.d[2]) * segment.invLength2));
+      const ex = dx - segment.d[0] * t, ey = dy - segment.d[1] * t, ez = dz - segment.d[2] * t;
+      const d2 = ex * ex + ey * ey + ez * ez;
+      if (d2 < closest) { closest = d2; radius = segment.radius + segment.radiusDelta * t; }
+    }
+    return Math.sqrt(closest) - radius;
   }
   if (s.t === 2) {
     const dx = x - s.c[0], dy = y - s.c[1], dz = z - s.c[2];
@@ -239,7 +294,28 @@ const TAIL0: V3[] = [
   [0.05, -0.15, -0.71],
 ];
 let TAIL: V3[] = TAIL0;
-const TAIL_R = [0.12, 0.128, 0.128, 0.122];
+const TAIL_CONTROL_R = [0.12, 0.128, 0.128, 0.122];
+let TAIL_R = TAIL_CONTROL_R;
+const TAIL_SAMPLES = 18;
+// Scale around the attachment point, so the whole tail and its base are 10%
+// smaller without pulling the tail away from the body.
+const TAIL_SCALE = 0.9;
+/** Round the whole bend instead of joining three visibly swollen segments. */
+export function buildTailPath(height: number) {
+  const root = new THREE.Vector3(TAIL0[0][0], TAIL0[0][1] * height, TAIL0[0][2]);
+  const controls = TAIL0.map(p => new THREE.Vector3(p[0], p[1] * height, p[2]).sub(root).multiplyScalar(TAIL_SCALE).add(root));
+  const curve = new THREE.CatmullRomCurve3(controls, false, "centripetal");
+  const points: V3[] = [], radii: number[] = [];
+  for (let i = 0; i <= TAIL_SAMPLES; i++) {
+    const t = i / TAIL_SAMPLES;
+    const p = curve.getPoint(t);
+    points.push([p.x, p.y, p.z]);
+    const along = t * (TAIL_CONTROL_R.length - 1);
+    const index = Math.min(TAIL_CONTROL_R.length - 2, Math.floor(along));
+    radii.push(THREE.MathUtils.lerp(TAIL_CONTROL_R[index], TAIL_CONTROL_R[index + 1], along - index) * TAIL_SCALE);
+  }
+  return { points, radii };
+}
 
 interface FaceStroke {
   x: number; // frame centre (head-local, unscaled, front view)
@@ -297,11 +373,17 @@ class Cat {
     const ny = T.noseY, ns = 0.65 + 0.35 * T.noseSize;
     const fat = T.belly;
     const mk = T.mouth;
-    // ---- plush bean body: pear shape, the top part can be made really narrow ----
-    this.add(ell("torso", [0, ty(-0.2), 0.0], [0.4 * bb, ty(0.38) * (0.7 + 0.3 * bb), 0.33 * bb]));
-    this.add(ell("torso", [0, ty(0.14), 0.0], [0.33 * bt, ty(0.34) * (0.65 + 0.35 * bt), 0.27 * (0.5 + 0.5 * bt)], 0.26));
-    // round pot belly (fatness adjustable)
-    this.add(ell("torso", [0, ty(-0.14), 0.08 + 0.07 * (fat - 1)], [0.3 * bb * (0.85 + 0.15 * fat), ty(0.33) * (0.85 + 0.15 * fat), 0.28 * fat], 0.18));
+    if (getShapeMode() === "figure") {
+      // Figurine silhouette: a full upright chest flows into a softly rounded
+      // pelvis and into the head, instead of enlarging the classic pear.
+      const volumes = rig.selfVolumes(T).torso;
+      volumes.forEach((v, i) => this.add(ell("torso", v.c, v.r, [0, 0.22, 0.14][i])));
+    } else {
+      // Preserve the original silhouette exactly for side-by-side comparison.
+      this.add(ell("torso", [0, ty(-0.2), 0.0], [0.4 * bb, ty(0.38) * (0.7 + 0.3 * bb), 0.33 * bb]));
+      this.add(ell("torso", [0, ty(0.14), 0.0], [0.33 * bt, ty(0.34) * (0.65 + 0.35 * bt), 0.27 * (0.5 + 0.5 * bt)], 0.26));
+      this.add(ell("torso", [0, ty(-0.14), 0.08 + 0.07 * (fat - 1)], [0.3 * bb * (0.85 + 0.15 * fat), ty(0.33) * (0.85 + 0.15 * fat), 0.28 * fat], 0.18));
+    }
     // ---- small, round, full head sitting right on the shoulders ----
     this.add(ell("head", hd(0, 0.02, -0.01), hr(0.56, 0.5, 0.5), 0.26));
     // smooth, full back of the head (rounded occiput) that flows into the nape
@@ -329,25 +411,50 @@ class Cat {
     // arms are separate rigid pieces with a ball joint buried in the shoulder:
     // rotating around the pivot never stretches the body skin (no flaps / "gelambir")
     for (const a of ["armL", "armR"] as const) {
-      const rRoot = 0.088 * ar;
-      const ball = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [0, rig.LIMB_TOP[1] - 0.001, 0]), rRoot, rRoot, 0);
-      ball.col.setHex(this.fur);
-      this.arms.push(ball);
-      const sh = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [0, AY(-0.15), 0]), rRoot, 0.095 * (0.45 * ar + 0.55 * at), 0.06);
-      sh.col.setHex(this.fur);
-      this.arms.push(sh);
-      const paw = ell(a, B(a, [0, PAW(), 0.01]), [0.112 * at, 0.105 * at, 0.11 * at], 0.045);
-      paw.col.setHex(this.fur);
-      this.arms.push(paw);
+      const figure = getShapeMode() === "figure";
+      if (figure) {
+        // One continuous tapered capsule avoids the stacked, swollen look of
+        // overlapping shoulder and forearm blobs. The mitten blends softly
+        // into the end; the original fur and palm paints stay in place.
+        const arm = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [0, AY(-0.19), 0]),
+          0.073 * ar, 0.086 * (0.45 * ar + 0.55 * at), 0);
+        const paw = ell(a, B(a, [0, PAW(), 0.01]), [0.104 * at, 0.102 * at, 0.105 * at], 0.025);
+        arm.col.setHex(this.fur);
+        paw.col.setHex(this.fur);
+        this.arms.push(arm, paw);
+      } else {
+        const rRoot = 0.088 * ar;
+        const ball = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [0, rig.LIMB_TOP[1] - 0.001, 0]), rRoot, rRoot, 0);
+        ball.col.setHex(this.fur);
+        this.arms.push(ball);
+        const sh = cone(a, B(a, [0, rig.LIMB_TOP[1], 0]), B(a, [0, AY(-0.15), 0]), rRoot, 0.095 * (0.45 * ar + 0.55 * at), 0.06);
+        sh.col.setHex(this.fur);
+        this.arms.push(sh);
+        const paw = ell(a, B(a, [0, PAW(), 0.01]), [0.112 * at, 0.105 * at, 0.11 * at], 0.045);
+        paw.col.setHex(this.fur);
+        this.arms.push(paw);
+      }
     }
     // ---- short stubby legs with round feet ----
     const lr = T.legRoot, lt = T.legTip;
     for (const l of ["legL", "legR"] as const) {
-      this.add(cone(l, B(l, [0, 0.08, 0]), B(l, [0, LY(-0.17), 0.02]), 0.14 * lr, 0.135 * (0.5 * lr + 0.5 * lt), 0.08));
-      this.add(ell(l, B(l, [0, LY(-0.25), 0.06]), [0.145 * lt, 0.1 * (0.7 + 0.3 * lt), 0.175 * lt], 0.06));
+      const figure = getShapeMode() === "figure";
+      this.add(cone(l, B(l, [0, 0.08, 0]), B(l, [0, LY(-0.17), 0.02]), (figure ? 0.18 : 0.14) * lr, (figure ? 0.17 : 0.135) * (0.5 * lr + 0.5 * lt), 0.08));
+      // A wider, flatter foot blends into the leg like the reference figure;
+      // its bottom stays at the same height as the classic foot.
+      const footH = 0.1 * (0.7 + 0.3 * lt);
+      const figureH = footH * 0.78;
+      const footY = LY(-0.25) - (figure ? figureFootOffset() : 0);
+      if (figure) {
+        // A shaped paw, not a scaled sphere: broad front, soft corners and a
+        // flat sole, smoothly joined to the leg. Fur paints remain unchanged.
+        this.add(roundBox(l, B(l, [0, footY, 0.06]), [0.187 * lt, figureH, 0.205 * lt], 0.064, 0.07));
+      } else {
+        this.add(ell(l, B(l, [0, footY, 0.06]), [0.145 * lt, footH, 0.175 * lt], 0.06));
+      }
     }
     // ---- tail ----
-    for (let i = 0; i < TAIL.length - 1; i++) this.add(cone("torso", TAIL[i], TAIL[i + 1], TAIL_R[i], TAIL_R[i + 1], i === 0 ? 0.08 : 0.04));
+    this.add(tailTube(TAIL, TAIL_R, 0.08 * TAIL_SCALE));
   }
 
   /** big cute triangle ears (wide base, softly rounded tip, tilted out) like the tuxedo plush */
@@ -396,7 +503,7 @@ class Cat {
   paws(col: number, soft = 0.008) {
     const at = TU.armTip, lt = TU.legTip;
     for (const a of ["armL", "armR"] as const) this.paint(ell("torso", B(a, [0, PAW() - 0.025 * at, 0.0]), [0.17 * at, 0.13 * at, 0.17 * at]), col, soft);
-    for (const l of ["legL", "legR"] as const) this.paint(ell("torso", B(l, [0, LY(-0.25), 0.07]), [0.22 * lt, 0.13, 0.26 * lt]), col, soft);
+    for (const l of ["legL", "legR"] as const) this.paint(ell("torso", B(l, [0, LY(-0.25) - figureFootOffset(), 0.07]), [0.22 * lt, 0.13, 0.26 * lt]), col, soft);
     this.toes(new THREE.Color(col).multiplyScalar(0.78).lerp(new THREE.Color(0xe39aae), 0.45).getHex());
   }
   /** little toe grooves on the front of the feet */
@@ -404,7 +511,7 @@ class Cat {
     const lt = TU.legTip;
     for (const l of ["legL", "legR"] as const) {
       for (const dx of [-0.05, 0, 0.05]) {
-        this.paint(slab(B(l, [dx * lt, LY(-0.31), 0.2 * lt]), [1, 0, 0], 0.0055, 0.06), col, 0.004);
+        this.paint(slab(B(l, [dx * lt, LY(-0.31) - figureFootOffset(), 0.2 * lt]), [1, 0, 0], 0.0055, 0.06), col, 0.004);
       }
     }
   }
@@ -435,9 +542,10 @@ class Cat {
     this.paint(ell("torso", [0, ty(-0.05), 0.27 + 0.1 * (TU.belly - 1)], [0.235 * bb, ty(0.44), 0.26]), col, 0.008, 1, PI.torso);
   }
   tailColor(col: number, from = 0) {
-    for (let i = from; i < TAIL.length - 1; i++) {
-      this.paint(cone("torso", TAIL[i], TAIL[i + 1], TAIL_R[i] + 0.04, TAIL_R[i + 1] + 0.04), col, 0.012);
-    }
+    // "from" originally selected one of three tail sections; keep that
+    // meaning while painting the smooth curve in a single continuous pass.
+    const start = Math.min(TAIL.length - 2, Math.floor(from / 3 * (TAIL.length - 1)));
+    this.paint(tailTube(TAIL.slice(start), TAIL_R.slice(start).map(r => r + 0.04)), col, 0.012);
   }
   tailBands(col: number, n = 5) {
     const total = TAIL.length - 1;
@@ -684,6 +792,83 @@ interface Asset {
   recipe: Recipe;
 }
 const assetCache = new Map<string, Asset>();
+function pruneOldAssets(key: string) {
+  const revision = key.slice(key.indexOf("#"));
+  for (const [oldKey, asset] of assetCache) {
+    if (oldKey.endsWith(revision)) continue;
+    assetCache.delete(oldKey);
+    // An old preview can still use these arrays and will re-upload them if
+    // needed; disposal releases GPU buffers belonging to obsolete shapes.
+    asset.geometry.dispose();
+    asset.armGeometry.dispose();
+  }
+}
+/** Transferable buffers used to build the exact same full-detail mesh off the UI thread. */
+export interface PackedCharacterGeometry {
+  position: Float32Array;
+  normal: Float32Array;
+  color: Float32Array;
+  skinIndex: Uint16Array;
+  skinWeight: Float32Array;
+  index: Uint16Array | Uint32Array;
+}
+export interface PackedCharacterAsset {
+  geometry: PackedCharacterGeometry;
+  armGeometry: PackedCharacterGeometry;
+}
+function packGeometry(g: THREE.BufferGeometry): PackedCharacterGeometry {
+  const a = (name: string) => (g.getAttribute(name) as THREE.BufferAttribute).array;
+  return {
+    position: Float32Array.from(a("position")), normal: Float32Array.from(a("normal")),
+    color: Float32Array.from(a("color")), skinIndex: Uint16Array.from(a("skinIndex")),
+    skinWeight: Float32Array.from(a("skinWeight")),
+    index: g.getIndex()!.array instanceof Uint32Array ? Uint32Array.from(g.getIndex()!.array) : Uint16Array.from(g.getIndex()!.array),
+  };
+}
+function unpackGeometry(data: PackedCharacterGeometry) {
+  const g = new THREE.BufferGeometry();
+  g.setAttribute("position", new THREE.BufferAttribute(data.position, 3));
+  g.setAttribute("normal", new THREE.BufferAttribute(data.normal, 3));
+  g.setAttribute("color", new THREE.BufferAttribute(data.color, 3));
+  g.setAttribute("skinIndex", new THREE.BufferAttribute(data.skinIndex, 4));
+  g.setAttribute("skinWeight", new THREE.BufferAttribute(data.skinWeight, 4));
+  g.setIndex(new THREE.BufferAttribute(data.index, 1));
+  g.computeBoundingSphere();
+  return g;
+}
+export function hasCharacterAsset(def: AnimalDef, noEars = false) {
+  return assetCache.has(`${def.id}${noEars ? "~ne" : ""}#${tuningKey(getRigTuning())}`);
+}
+/** Copy rather than transfer the cached worker buffers, so worker rendering stays valid. */
+export function packCharacterAsset(def: AnimalDef, noEars = false): PackedCharacterAsset {
+  const asset = getAsset(def, noEars);
+  return { geometry: packGeometry(asset.geometry), armGeometry: packGeometry(asset.armGeometry) };
+}
+/** Install worker-built geometry only if the player's tuning still matches. */
+export function installCharacterAsset(def: AnimalDef, noEars: boolean, revision: string, data: PackedCharacterAsset) {
+  if (revision !== tuningKey() || hasCharacterAsset(def, noEars)) return false;
+  const T = getRigTuning();
+  TU = T;
+  HS = 0.745 * T.head;
+  rig.applyRig(T);
+  computeBind();
+  BH = T.bodyH;
+  ({ points: TAIL, radii: TAIL_R } = buildTailPath(BH));
+  HB = rig.HEAD_OFFSET;
+  HO = rig.HEAD_OFFSET + T.neck;
+  NO_EARS = noEars;
+  const recipe = recipeFor(def.id);
+  NO_EARS = false;
+  const key = `${def.id}${noEars ? "~ne" : ""}#${tuningKey(T)}`;
+  pruneOldAssets(key);
+  assetCache.set(key, {
+    geometry: unpackGeometry(data.geometry), armGeometry: unpackGeometry(data.armGeometry), recipe,
+    bindPos: bindPos.map(v => v.clone()), bindQuat: bindQuat.map(q => q.clone()),
+    boneInverses: bindMat.map(m => m.clone().invert()),
+  });
+  return true;
+}
+
 /** neck skin split (bind-space height centre + half band), set per build */
 const neckSplit = { c: 0.2, b: 0.07 };
 
@@ -696,14 +881,73 @@ export const SKIN_MATERIAL = new THREE.MeshPhysicalMaterial({
   sheenColor: new THREE.Color(0xffffff),
 });
 
+/** Refine only the little tail, leaving the rest of the character mesh (and
+ * its frame cost) unchanged. Shared edge midpoints keep the surface watertight. */
+function refineTail(geo: THREE.BufferGeometry, tail: Shape, sdf: (x: number, y: number, z: number) => number) {
+  const pos = geo.getAttribute("position") as THREE.BufferAttribute;
+  const index = geo.getIndex();
+  if (!index) return;
+  const vertices = Array.from(pos.array as Float32Array);
+  const triangles: number[] = [];
+  const edges = new Map<string, number>();
+  const midpoint = (a: number, b: number) => {
+    const key = a < b ? `${a}:${b}` : `${b}:${a}`;
+    const cached = edges.get(key);
+    if (cached !== undefined) return cached;
+    let x = (vertices[a * 3] + vertices[b * 3]) / 2;
+    let y = (vertices[a * 3 + 1] + vertices[b * 3 + 1]) / 2;
+    let z = (vertices[a * 3 + 2] + vertices[b * 3 + 2]) / 2;
+    // Keep the blend at the root intact; refine the exposed curved tube.
+    if (z > -0.42 || shapeDist(tail, x, y, z) > 0.045) {
+      edges.set(key, -1);
+      return -1;
+    }
+    // Midpoints lie inside the old coarse triangles. Project them back onto
+    // the same continuous signed-distance surface before recomputing normals.
+    const epsilon = 0.0025;
+    const nx = sdf(x + epsilon, y, z) - sdf(x - epsilon, y, z);
+    const ny = sdf(x, y + epsilon, z) - sdf(x, y - epsilon, z);
+    const nz = sdf(x, y, z + epsilon) - sdf(x, y, z - epsilon);
+    const length = Math.hypot(nx, ny, nz) || 1;
+    const correction = THREE.MathUtils.clamp(sdf(x, y, z), -0.02, 0.02) / length;
+    x -= nx * correction; y -= ny * correction; z -= nz * correction;
+    const result = vertices.length / 3;
+    vertices.push(x, y, z);
+    edges.set(key, result);
+    return result;
+  };
+  for (let i = 0; i < index.count; i += 3) {
+    let a = index.getX(i), b = index.getX(i + 1), c = index.getX(i + 2);
+    // Marching-cubes welding can collapse a zero-area source triangle.
+    if (a === b || b === c || c === a) continue;
+    let ab = midpoint(a, b), bc = midpoint(b, c), ca = midpoint(c, a);
+    const count = Number(ab >= 0) + Number(bc >= 0) + Number(ca >= 0);
+    if (count === 0) triangles.push(a, b, c);
+    else if (count === 3) triangles.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
+    else if (count === 1) {
+      // Rotate the triangle until its subdivided edge is AB.
+      if (bc >= 0) { [a, b, c] = [b, c, a]; ab = bc; }
+      else if (ca >= 0) { [a, b, c] = [c, a, b]; ab = ca; }
+      triangles.push(a, ab, c, ab, b, c);
+    } else {
+      // Rotate until AB and BC are the two subdivided edges.
+      if (ab < 0) { [a, b, c] = [b, c, a]; [ab, bc] = [bc, ca]; }
+      else if (bc < 0) { [a, b, c] = [c, a, b]; [ab, bc] = [ca, ab]; }
+      triangles.push(b, bc, ab, a, ab, c, ab, bc, c);
+    }
+  }
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(vertices, 3));
+  geo.setIndex(triangles);
+}
+
 function getAsset(def: AnimalDef, noEars = false): Asset {
-  const T = getTuning();
+  const T = getRigTuning();
   TU = T;
   HS = 0.745 * T.head;
   rig.applyRig(T);
   computeBind();
   BH = T.bodyH;
-  TAIL = TAIL0.map((p) => [p[0], p[1] * BH, p[2]] as V3);
+  ({ points: TAIL, radii: TAIL_R } = buildTailPath(BH));
   HB = rig.HEAD_OFFSET;
   HO = rig.HEAD_OFFSET + T.neck;
   const cacheKey = `${def.id}${noEars ? "~ne" : ""}#${tuningKey(T)}`;
@@ -714,7 +958,30 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   NO_EARS = false;
   const { paints } = recipe;
   const buildGeo = (shapes: Shape[], rigid: "arms" | "head" | null) => {
-  const sdf = (x: number, y: number, z: number) => sceneDist(shapes, x, y, z);
+  const figure = getShapeMode() === "figure";
+  const grooves: Shape[] = [];
+  if (figure && !rigid) {
+    const lt = TU.legTip, footY = LY(-0.25) - figureFootOffset();
+    for (const leg of ["legL", "legR"] as const) {
+      for (const x of [-0.055, 0.055]) {
+        grooves.push(ell(leg, B(leg, [x * lt, footY - 0.02, 0.06 + 0.205 * lt + 0.008]), [0.014, 0.038, 0.022]));
+      }
+    }
+  }
+  // A gently grounded sole on the figurine rather than ball-shaped feet.
+  // Cut only the body mesh in bind space; the separate hands remain untouched.
+  const sdf = (x: number, y: number, z: number) => {
+    let d = sceneDist(shapes, x, y, z);
+    if (figure && !rigid) {
+      d = Math.max(d, -rig.HOVER + 0.003 - y);
+      for (const g of grooves) {
+        if (Math.abs(x - g.c[0]) < 0.02 && Math.abs(y - g.c[1]) < 0.06 && Math.abs(z - g.c[2]) < 0.04) {
+          d = -smin(-d, shapeDist(g, x, y, z), 0.015);
+        }
+      }
+    }
+    return d;
+  };
 
   const mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
   for (const s of shapes)
@@ -724,7 +991,8 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
     }
   const center = [(mn[0] + mx[0]) / 2, (mn[1] + mx[1]) / 2, (mn[2] + mx[2]) / 2];
   const ext = Math.max(mx[0] - mn[0], mx[1] - mn[1], mx[2] - mn[2]) / 2 + 0.1;
-  const res = Math.min(112, Math.max(60, Math.ceil((2 * ext) / 0.026)));
+  // The optional figurine uses a finer surface for its soft rounded silhouette.
+  const res = figure ? Math.min(148, Math.max(80, Math.ceil((2 * ext) / 0.018))) : Math.min(112, Math.max(60, Math.ceil((2 * ext) / 0.026)));
 
   const mc = new MarchingCubes(res, SKIN_MATERIAL, false, false, 90000);
   mc.isolation = 0;
@@ -766,6 +1034,8 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   let geo = new THREE.BufferGeometry();
   geo.setAttribute("position", new THREE.BufferAttribute(raw, 3));
   geo = mergeVertices(geo, 1e-4);
+  const tail = !rigid ? shapes.find(s => s.t === 3) : undefined;
+  if (tail) refineTail(geo, tail, sdf);
   const pos = geo.getAttribute("position") as THREE.BufferAttribute;
   const n = pos.count;
 
@@ -939,7 +1209,7 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   const armGeometry = buildGeo(recipe.arms, "arms");
 
   const asset: Asset = { bindPos: bindPos.map((v) => v.clone()), bindQuat: bindQuat.map((q) => q.clone()), geometry, armGeometry, boneInverses: bindMat.map((m) => m.clone().invert()), recipe };
-  for (const k of [...assetCache.keys()]) if (!k.endsWith(cacheKey.slice(cacheKey.indexOf("#")))) assetCache.delete(k);
+  pruneOldAssets(cacheKey);
   assetCache.set(cacheKey, asset);
   return asset;
 }
@@ -1095,16 +1365,21 @@ function decalMat(color: number, layer: number, rough = 0.55) {
       polygonOffsetFactor: -1 - layer,
       polygonOffsetUnits: -4 - layer * 4,
     });
+    sharedMaterials.add(m);
     decalMatCache.set(key, m);
   }
   return m;
 }
 
-function decal(fr: Frame, tris: Tri2[], color: number, layer: number, rough = 0.55): THREE.Mesh | null {
+function decal(fr: Frame, tris: Tri2[], color: number, layer: number, rough = 0.55, motion?: { mx: number; my: number }): THREE.Mesh | null {
   if (!tris.length) return null;
   const sub = subdivide(tris, 0.022 / fr.scale);
   const pos = new Float32Array(sub.length * 9);
   const nrm = new Float32Array(sub.length * 9);
+  const offsets = motion ? [[motion.mx, 0], [-motion.mx, 0], [0, motion.my], [0, -motion.my]] : [];
+  const morphPositions = offsets.map(() => new Float32Array(sub.length * 9));
+  const morphNormals = offsets.map(() => new Float32Array(sub.length * 9));
+  const morphCaches = offsets.map(() => new Map<string, { p: THREE.Vector3; n: THREE.Vector3 }>());
   const dir = fr.D.clone().negate();
   const start = new THREE.Vector3();
   const lift = 0.0036 + layer * 0.0016;
@@ -1129,12 +1404,35 @@ function decal(fr: Frame, tris: Tri2[], color: number, layer: number, rough = 0.
       nrm[o] = hit.n.x;
       nrm[o + 1] = hit.n.y;
       nrm[o + 2] = hit.n.z;
+      for (let i = 0; i < offsets.length; i++) {
+        const [dx, dy] = offsets[i];
+        let shifted = morphCaches[i].get(key);
+        if (!shifted) {
+          start.copy(fr.P).addScaledVector(fr.T, u * fr.scale + dx).addScaledVector(fr.U, v * fr.scale + dy).addScaledVector(fr.D, 0.3);
+          shifted = march(fr.shapes, start, dir);
+          morphCaches[i].set(key, shifted);
+        }
+        // The group translates tangentially. Morph only the residual needed to
+        // reproject every vertex to the curved face at the new gaze position.
+        const tx = fr.T.x * dx + fr.U.x * dy, ty = fr.T.y * dx + fr.U.y * dy, tz = fr.T.z * dx + fr.U.z * dy;
+        morphPositions[i][o] = shifted.p.x + shifted.n.x * lift - pos[o] - tx;
+        morphPositions[i][o + 1] = shifted.p.y + shifted.n.y * lift - fr.boneY - pos[o + 1] - ty;
+        morphPositions[i][o + 2] = shifted.p.z + shifted.n.z * lift - pos[o + 2] - tz;
+        morphNormals[i][o] = shifted.n.x - hit.n.x;
+        morphNormals[i][o + 1] = shifted.n.y - hit.n.y;
+        morphNormals[i][o + 2] = shifted.n.z - hit.n.z;
+      }
       o += 3;
     }
   }
   const g = new THREE.BufferGeometry();
   g.setAttribute("position", new THREE.BufferAttribute(pos, 3));
   g.setAttribute("normal", new THREE.BufferAttribute(nrm, 3));
+  if (motion) {
+    g.morphTargetsRelative = true;
+    g.morphAttributes.position = morphPositions.map(a => new THREE.BufferAttribute(a, 3));
+    g.morphAttributes.normal = morphNormals.map(a => new THREE.BufferAttribute(a, 3));
+  }
   g.computeBoundingSphere();
   const m = new THREE.Mesh(g, decalMat(color, layer, rough));
   m.castShadow = false;
@@ -1206,34 +1504,110 @@ let X_PUPILS: PupilRig[] = [];
 function pupilGroup(parent: THREE.Group, fr: Frame, mx: number, my: number) {
   const g = new THREE.Group();
   parent.add(g);
-  X_PUPILS.push({ g, T: fr.T.clone(), U: fr.U.clone(), mx: mx * fr.scale, my: my * fr.scale });
+  const pupil = { g, T: fr.T.clone(), U: fr.U.clone(), mx: mx * fr.scale, my: my * fr.scale };
+  g.userData.pupilRig = pupil;
+  X_PUPILS.push(pupil);
   return g;
 }
+function pupilDecal(g: THREE.Group, fr: Frame, tris: Tri2[], color: number, layer: number, rough = 0.55) {
+  const pupil = g.userData.pupilRig as PupilRig;
+  return decal(fr, tris, color, layer, rough, pupil);
+}
+/** Move over the curved surface without letting any pupil vertices sink into the head. */
+export function setPupilGaze(p: PupilRig, gx: number, gy: number) {
+  gx = THREE.MathUtils.clamp(gx, -1, 1);
+  gy = THREE.MathUtils.clamp(gy, -1, 1);
+  const dx = gx * p.mx, dy = gy * p.my;
+  p.g.position.set(p.T.x * dx + p.U.x * dy, p.T.y * dx + p.U.y * dy, p.T.z * dx + p.U.z * dy);
+  for (const child of p.g.children) {
+    const influences = (child as THREE.Mesh).morphTargetInfluences;
+    if (influences) {
+      influences[0] = Math.max(0, gx); influences[1] = Math.max(0, -gx);
+      influences[2] = Math.max(0, gy); influences[3] = Math.max(0, -gy);
+    }
+  }
+}
 
-function buildEye(rec: Recipe, side: 1 | -1, hs: Shape[], eyesNormal: THREE.Group, eyesKO: THREE.Group) {
+function buildEye(rec: Recipe, side: 1 | -1, hs: Shape[], eyesNormal: THREE.Group, eyesKO: THREE.Group, style: EyeStyleId) {
   const T = TU;
   const z = T.eyeSize;
   const ex = side * EYE.x * T.eyeX;
   const ey = EYE.y + T.eyeY;
   const fr = frameAt(hs, ex, ey, HS, HO, 0.65);
   const above = march(hs, new THREE.Vector3(ex * HS, (ey + 0.2 * z) * HS + HO, 1.8), new THREE.Vector3(0, 0, -1)).p;
+  // Each eye has its own pivot at the surface, so blinking closes in place
+  // instead of squashing the entire face toward the centre of the head.
+  const eyePivot = new THREE.Group();
+  eyePivot.position.copy(toLocal(fr.P));
+  const eyeContent = new THREE.Group();
+  eyeContent.position.copy(eyePivot.position).negate();
+  eyePivot.add(eyeContent);
+  eyesNormal.add(eyePivot);
   const darkFur = lum(colorAt(rec, above, new THREE.Color())) < 0.09;
   const koCol = darkFur ? 0xd6d0dc : DARK;
   let koSize = 0.12 * z;
 
-  if (rec.eye === "pill") {
+  if (style === "green") {
+    // A soft green crescent and tiny catchlight on an almost-black eye.
+    const R = 0.16 * z;
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, R + 0.012 * z, R * 1.05 + 0.012 * z, 44)), 0x4d4542, 0, 0.35));
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, R, R * 1.05, 44)), 0x11171a, 1, 0.2));
+    const pg = pupilGroup(eyeContent, fr, R * 0.10, R * 0.06);
+    addTo(pg, pupilDecal(pg, fr, polyTris(crescent(R * 0.83, R * 0.28, 0.18)), 0xa8ec91, 2, 0.3));
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(-R * 0.14, R * 0.49, R * 0.13, R * 0.15, 16)), 0xffffff, 3, 0.15));
+    koSize = 0.13 * z;
+  } else if (style === "goofy") {
+    // Wide pale sclera, oversized dark pupils and two catchlights.
+    const w = 0.17 * z, h = 0.175 * z;
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, w + 0.014 * z, h + 0.014 * z, 48)), 0x594b46, 0, 0.35));
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, w, h, 48)), 0xfff7f2, 1, 0.32));
+    const pg = pupilGroup(eyeContent, fr, w * 0.11, h * 0.08);
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(0, -0.005 * z, w * 0.76, h * 0.8, 44)), 0x413832, 2, 0.25));
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(0, -0.005 * z, w * 0.62, h * 0.67, 40)), 0x171619, 3, 0.17));
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(-w * 0.24, h * 0.33, 0.024 * z, 0.025 * z, 16)), 0xffffff, 4, 0.12));
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(w * 0.28, h * 0.03, 0.010 * z, 0.010 * z, 12)), 0xffe9dc, 4, 0.12));
+    koSize = 0.13 * z;
+  } else if (style === "round" || style === "slit") {
+    // Golden eyes from the reference: a thick rim and a glossy moving pupil.
+    const w = 0.17 * z, h = (style === "round" ? 0.17 : 0.16) * z;
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, w + 0.016 * z, h + 0.016 * z, 48)), DARK, 0, 0.22));
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, w, h, 48)), 0xf6bb35, 1, 0.28));
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, w * 0.88, h * 0.88, 44)), 0xffd45c, 2, 0.3));
+    const pw = w * (style === "round" ? 0.70 : 0.30);
+    const ph = h * (style === "round" ? 0.74 : 0.82);
+    const pg = pupilGroup(eyeContent, fr, w * (style === "round" ? 0.09 : 0.24), h * 0.07);
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(0, -h * 0.035, pw, ph, 40)), 0x14131a, 3, 0.17));
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(-pw * 0.28, ph * 0.48, Math.min(pw * 0.24, 0.025 * z), 0.022 * z, 16)), 0xffffff, 4, 0.12));
+    if (style === "round") addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(pw * 0.35, ph * 0.22, 0.011 * z, 0.011 * z, 12)), 0xfff4cb, 4, 0.12));
+    koSize = 0.13 * z;
+  } else if (style === "grumpy") {
+    // Low, slightly angled lids and mint irises give a calm grumpy expression.
+    const w = 0.175 * z, h = 0.155 * z;
+    const lidY = (x: number) => 0.01 * z + side * 0.10 * x;
+    const clip = (x: number, y: number) => y - lidY(x);
+    const rim = clipHalf(ellipse(0, 0, w + 0.017 * z, h + 0.017 * z, 48), clip);
+    const iris = clipHalf(ellipse(0, -0.006 * z, w, h, 48), (x, y) => y - (lidY(x) - 0.009 * z));
+    addTo(eyeContent, decal(fr, polyTris(rim), DARK, 0, 0.3));
+    addTo(eyeContent, decal(fr, polyTris(iris), 0x76e0c5, 1, 0.3));
+    const pg = pupilGroup(eyeContent, fr, w * 0.14, 0);
+    const pupil = clipHalf(ellipse(0, -0.035 * z, w * 0.28, h * 0.63, 32), (x, y) => y - (lidY(x) - 0.018 * z));
+    addTo(pg, pupilDecal(pg, fr, polyTris(pupil), DARK, 2, 0.25));
+    const lid: Vec2[] = [[-w * 1.1, lidY(-w * 1.1)], [w * 1.1, lidY(w * 1.1)]];
+    addTo(eyeContent, decal(fr, strokeTris(lid, 0.027 * z, 0.027 * z), DARK, 4, 0.3));
+    koSize = 0.12 * z;
+  } else if (rec.eye === "pill") {
     const w = 0.08 * z, h = 0.056 * z;
-    const pg = pupilGroup(eyesNormal, fr, 0.022 * z, 0.012 * z);
-    addTo(pg, decal(fr, polyTris(stadium(w, h)), DARK, 1, 0.25));
-    addTo(pg, decal(fr, polyTris(ellipse(w * 0.32, h * 0.32, 0.018 * z, 0.018 * z, 12)), 0xffffff, 2, 0.2));
+    const pg = pupilGroup(eyeContent, fr, 0.022 * z, 0.012 * z);
+    addTo(pg, pupilDecal(pg, fr, polyTris(stadium(w, h)), DARK, 1, 0.25));
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(w * 0.32, h * 0.32, 0.018 * z, 0.018 * z, 12)), 0xffffff, 2, 0.2));
     koSize = 0.08 * z;
   } else if (rec.eye === "puppy") {
     // reference 3: big black round eye, thick green crescent at the bottom, white dot near the top
     const R = 0.165 * z;
-    addTo(eyesNormal, decal(fr, polyTris(ellipse(0, 0, R, R * 1.04, 44)), DARK, 0, 0.2));
-    const pg = pupilGroup(eyesNormal, fr, R * 0.13, R * 0.09);
-    addTo(pg, decal(fr, polyTris(crescent(R * 0.84, R * 0.27, 0.18)), rec.iris, 1, 0.3));
-    addTo(eyesNormal, decal(fr, polyTris(ellipse(side * R * 0.08, R * 0.5, R * 0.17, R * 0.17, 20)), 0xffffff, 2, 0.15));
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, R, R * 1.04, 44)), DARK, 0, 0.2));
+    const pg = pupilGroup(eyeContent, fr, R * 0.19, R * 0.12);
+    addTo(pg, pupilDecal(pg, fr, polyTris(crescent(R * 0.84, R * 0.27, 0.18)), rec.iris, 1, 0.3));
+    addTo(eyeContent, decal(fr, polyTris(ellipse(side * R * 0.08, R * 0.5, R * 0.17, R * 0.17, 20)), 0xffffff, 2, 0.15));
     koSize = 0.13 * z;
   } else {
     // reference 4: huge green iris, big dark pupil (with a darker rim), thick outline, flat grumpy lid
@@ -1254,20 +1628,20 @@ function buildEye(rec: Recipe, side: 1 | -1, hs: Shape[], eyesNormal: THREE.Grou
     const lidLow = (x: number, y: number) => (hasLid ? y - (lidY(x) - 0.012 * z) : -1);
     const pupilRim = clipHalf(ellipse(px, py, w * 0.62, h * 0.72, 36), lidLow);
     const pupil = clipHalf(ellipse(px, py, w * 0.52, h * 0.6, 36), lidLow);
-    addTo(eyesNormal, decal(fr, polyTris(out), DARK, 0, 0.3));
-    addTo(eyesNormal, decal(fr, polyTris(iris), rec.iris, 1, 0.3));
-    const pg = pupilGroup(eyesNormal, fr, w * 0.19, h * 0.07);
-    addTo(pg, decal(fr, polyTris(pupilRim), 0x1a1a1f, 2, 0.25));
-    addTo(pg, decal(fr, polyTris(pupil), 0x34343b, 3, 0.25));
+    addTo(eyeContent, decal(fr, polyTris(out), DARK, 0, 0.3));
+    addTo(eyeContent, decal(fr, polyTris(iris), rec.iris, 1, 0.3));
+    const pg = pupilGroup(eyeContent, fr, w * 0.23, h * 0.11);
+    addTo(pg, pupilDecal(pg, fr, polyTris(pupilRim), 0x1a1a1f, 2, 0.25));
+    addTo(pg, pupilDecal(pg, fr, polyTris(pupil), 0x34343b, 3, 0.25));
     const hl = clipHalf(ellipse(px + w * 0.2, py + h * 0.22, w * 0.09, w * 0.09, 14), lidLow);
-    addTo(pg, decal(fr, polyTris(hl), 0xe8e8ee, 4, 0.2));
+    addTo(pg, pupilDecal(pg, fr, polyTris(hl), 0xe8e8ee, 4, 0.2));
     if (hasLid) {
       const top: Vec2[] = [];
       for (let i = 0; i <= 26; i++) {
         const x = -1.35 * w + (2.7 * w * i) / 26;
         if (inPoly(outline, x, lidY(x) - 0.004)) top.push([x, lidY(x)]);
       }
-      if (top.length >= 2) addTo(eyesNormal, decal(fr, strokeTris(top, 0.03 * z, 0.03 * z), DARK, 5, 0.3));
+      if (top.length >= 2) addTo(eyeContent, decal(fr, strokeTris(top, 0.03 * z, 0.03 * z), DARK, 5, 0.3));
     }
   }
   // ---- DIZZY "@_@": white disc with a dark spiral ----
@@ -1295,11 +1669,11 @@ function buildEye(rec: Recipe, side: 1 | -1, hs: Shape[], eyesNormal: THREE.Grou
   addTo(X_HURT, decal(fr, polyTris(ellipse(side * cw * 0.66, -cw * 2.18, 0.012 * z, 0.016 * z, 8)), 0xffffff, 4, 0.15));
 }
 
-function buildFace(rec: Recipe, head: THREE.Bone, _torso: THREE.Bone, eyesNormal: THREE.Group, eyesKO: THREE.Group) {
+function buildFace(rec: Recipe, head: THREE.Bone, _torso: THREE.Bone, eyesNormal: THREE.Group, eyesKO: THREE.Group, eyeStyle: EyeStyleId, expression: ExpressionId) {
   // decals sit on the real (blended head + body) surface so they're never buried in the neck blend
   const hs = rec.shapes.filter((s) => s.part === PI.head || s.part === PI.torso);
-  buildEye(rec, 1, hs, eyesNormal, eyesKO);
-  buildEye(rec, -1, hs, eyesNormal, eyesKO);
+  buildEye(rec, 1, hs, eyesNormal, eyesKO, eyeStyle);
+  buildEye(rec, -1, hs, eyesNormal, eyesKO, eyeStyle);
   eyesKO.visible = false;
   head.add(eyesNormal, eyesKO);
   const face = new THREE.Group();
@@ -1329,7 +1703,7 @@ function buildFace(rec: Recipe, head: THREE.Bone, _torso: THREE.Bone, eyesNormal
   mouthCry.name = "mouthCry";
   mouthWavy.name = "mouthWavy";
   face.add(mouthN, mouthCry, mouthWavy);
-  if (!rec.noMouth) addTo(mouthN, decal(mz, strokeTris([[0, nBot + 0.004], [0, y0]], lw, lw), mouthCol, 1));
+  if (expression === "default" && !rec.noMouth) addTo(mouthN, decal(mz, strokeTris([[0, nBot + 0.004], [0, y0]], lw, lw), mouthCol, 1));
   // crying "wah" mouth
   const cm = ellipse(0, y0 - r * 0.95, r * 1.45, r * 1.15, 30);
   addTo(mouthCry, decal(mz, polyTris(cm), 0x7a2333, 1, 0.4));
@@ -1339,12 +1713,29 @@ function buildFace(rec: Recipe, head: THREE.Bone, _torso: THREE.Bone, eyesNormal
   addTo(mouthWavy, decal(mz, strokeTris(wave, lw, lw), mouthCol, 1));
   mouthCry.visible = false;
   mouthWavy.visible = false;
-  for (const s of rec.noMouth ? [] : [1, -1]) {
+  for (const s of expression !== "default" || rec.noMouth ? [] : [1, -1]) {
     const pts = curve(14, (t) => {
       const th = t * Math.PI * 1.05;
       return [s * (r - r * Math.cos(th)), y0 - r * 0.85 * Math.sin(th)];
     });
     addTo(mouthN, decal(mz, strokeTris(pts, lw, lw * 0.85), mouthCol, 1));
+  }
+
+  if (expression === "grumpy") {
+    const m = (0.7 + 0.3 * TU.mouth);
+    const arch = curve(24, t => {
+      const x = (t * 2 - 1) * 0.105 * m;
+      return [x, y0 - (0.025 + 0.075 * Math.pow(2 * t - 1, 2)) * m];
+    });
+    addTo(mouthN, decal(mz, strokeTris([[0, nBot], [0, y0 - 0.025 * m]], lw, lw), mouthCol, 2));
+    addTo(mouthN, decal(mz, strokeTris(arch, lw * 1.2, lw * 1.2), mouthCol, 2));
+  } else if (expression === "tongue") {
+    const m = (0.7 + 0.3 * TU.mouth);
+    // Layered mouth cavity and rounded tongue, placed entirely on the muzzle.
+    addTo(mouthN, decal(mz, polyTris(ellipse(0, y0 - 0.065 * m, 0.115 * m, 0.085 * m, 40)), 0x5a2530, 1, 0.4));
+    addTo(mouthN, decal(mz, polyTris(ellipse(0, y0 - 0.125 * m, 0.071 * m, 0.104 * m, 40)), 0x9e4f5e, 2, 0.45));
+    addTo(mouthN, decal(mz, polyTris(ellipse(0, y0 - 0.126 * m, 0.061 * m, 0.094 * m, 40)), 0xed8d9b, 3, 0.4));
+    addTo(mouthN, decal(mz, strokeTris([[0, y0 - 0.075 * m], [0, y0 - 0.15 * m]], 0.007 * m, 0.003 * m), 0xb55e70, 4, 0.45));
   }
 
   // whiskers: two per side, sticking out from the muzzle
@@ -1402,6 +1793,54 @@ const shadowed = <T extends THREE.Object3D>(o: T) => {
   });
   return o;
 };
+/**
+ * Batch rigid, opaque pieces that use identical materials. Geometry and all
+ * transforms are baked into the accessory's local frame; its silhouette,
+ * detail and detachable pivot remain unchanged. Animated googly eyes are
+ * deliberately excluded by the caller.
+ */
+function batchRigidDetails(root: THREE.Object3D) {
+  root.updateMatrixWorld(true);
+  const inverse = root.matrixWorld.clone().invert();
+  const groups = new Map<string, THREE.Mesh[]>();
+  root.traverse(object => {
+    if (!(object instanceof THREE.Mesh) || object instanceof THREE.SkinnedMesh || Array.isArray(object.material)) return;
+    const material = object.material;
+    if (!(material instanceof THREE.MeshStandardMaterial) || material.transparent || material.map || object.geometry.morphAttributes.position?.length) return;
+    const physical = material as THREE.MeshPhysicalMaterial;
+    const key = JSON.stringify([material.type, material.color.getHex(), material.roughness, material.metalness,
+      physical.clearcoat, physical.clearcoatRoughness, material.side, material.opacity, material.depthTest,
+      material.depthWrite, material.polygonOffset, material.polygonOffsetFactor, material.polygonOffsetUnits,
+      object.castShadow, object.receiveShadow, object.renderOrder]);
+    const list = groups.get(key) ?? [];
+    list.push(object);
+    groups.set(key, list);
+  });
+  for (const meshes of groups.values()) {
+    if (meshes.length < 2) continue;
+    const pieces = meshes.map(mesh => {
+      const geometry = mesh.geometry.index ? mesh.geometry.toNonIndexed() : mesh.geometry.clone();
+      // Rigid accessory materials don't use UVs or vertex colours. Removing
+      // incidental attributes makes custom surfaces and tubes compatible.
+      for (const name of Object.keys(geometry.attributes)) if (name !== "position" && name !== "normal") geometry.deleteAttribute(name);
+      geometry.applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse, mesh.matrixWorld));
+      return geometry;
+    });
+    const geometry = mergeGeometries(pieces);
+    for (const piece of pieces) piece.dispose();
+    if (!geometry) continue;
+    const merged = new THREE.Mesh(geometry, meshes[0].material);
+    merged.castShadow = meshes[0].castShadow;
+    merged.receiveShadow = meshes[0].receiveShadow;
+    merged.renderOrder = meshes[0].renderOrder;
+    for (const mesh of meshes) {
+      mesh.removeFromParent();
+      mesh.geometry.dispose();
+    }
+    root.add(merged);
+  }
+}
+
 /** cone from a to b (radius ra at a), optionally squashed across its width */
 function coneAB(a: THREE.Vector3, b: THREE.Vector3, ra: number, mat: THREE.Material, squash = 1, tipR = 0) {
   const d = new THREE.Vector3().subVectors(b, a);
@@ -1535,17 +1974,16 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
   const g = new THREE.Group();
   // crown is moulded on the head (ellipsoids only), slightly puffed up like a real structured cap
   const body = hs.filter((s) => s.t === 0 && !s.noBounds);
-  const ears = hs.filter((s) => s.t === 1);
   const Cb = new THREE.Vector3(0, 0.02 * HS + HO, -0.01 * HS);
   const th = 0.022 * HS;
   const e0 = (a: number) => {
     const w = (1 - Math.cos(a)) / 2; // 0 front .. 1 back
-    // new: front edge sits HIGH above the eyes like a real baseball cap (old sat low on the forehead)
-    return isNew ? 1.0 * (1 - w) - 0.22 * w : 0.72 * (1 - w) - 0.3 * w;
+    // Keep the front panel visible while leaving room above the eyes.
+    return isNew ? 0.78 * (1 - w) - 0.12 * w : 0.72 * (1 - w) - 0.3 * w;
   };
-  // new: taller structured dome that stands off the head instead of shrink-wrapping it
+  // Give the crown a softly structured shape instead of shrink-wrapping the head.
   const puff = (u: number) =>
-    (isNew ? 0.025 * HS : 0) + (isNew ? 0.105 : 0.05) * HS * Math.pow(Math.sin(Math.PI * Math.min(1, u * 1.1)), 0.8);
+    (isNew ? 0.035 * HS : 0) + (isNew ? 0.10 : 0.05) * HS * Math.pow(Math.sin(Math.PI * Math.min(1, u * 1.1)), 0.8);
   /** point on the cap surface in the given direction from the head centre (bind space) */
   const onCap = (d: THREE.Vector3, extra = 0) => {
     const a = Math.atan2(d.x, d.z);
@@ -1553,7 +1991,9 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
     const u = Math.max(0, (e - e0(a)) / (Math.PI / 2 - e0(a)));
     const dn = d.clone().normalize();
     const { p, n } = march(body, Cb.clone().addScaledVector(dn, 1.6), dn.clone().negate());
-    return { p: p.addScaledVector(n, th + puff(u) + extra), n };
+    p.addScaledVector(n, th + puff(u) + extra);
+    if (isNew) p.y += 0.055 * HS * Math.sin(u * Math.PI / 2);
+    return { p, n };
   };
   const dirAU = (a: number, u: number) => {
     const e = e0(a) + (Math.PI / 2 - e0(a)) * u;
@@ -1563,35 +2003,20 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
     const r = onCap(dirAU(a, Math.min(u, 0.995)), extra);
     return { p: toLocal(r.p), n: r.n, pb: r.p };
   };
-  // ear holes: ears poke through neat openings in the cap (no clipping)
-  const earGap = 0.022 * HS;
-  const inEar = (pb: THREE.Vector3) => ears.some((e) => shapeDist(e, pb.x, pb.y, pb.z) < earGap);
+  // The crown is continuous: the ears are tucked inside the cap.
   const A = 168, U = 42;
   const pos: number[] = [];
-  const hole: boolean[] = [];
-  const fv: number[] = [];
-  const PV: THREE.Vector3[] = [];
-  const earF = (pb: THREE.Vector3) => {
-    let f = 1;
-    for (const e of ears) f = Math.min(f, shapeDist(e, pb.x, pb.y, pb.z) - earGap);
-    return f;
-  };
   for (let iu = 0; iu <= U; iu++) {
     const u = Math.pow(iu / U, 0.9);
     for (let ia = 0; ia <= A; ia++) {
       const v = surf(-Math.PI + (2 * Math.PI * ia) / A, u);
       pos.push(v.p.x, v.p.y, v.p.z);
-      PV.push(v.p);
-      const f = earF(v.pb);
-      fv.push(f);
-      hole.push(f < 0);
     }
   }
   const idx: number[] = [];
   for (let iu = 0; iu < U; iu++)
     for (let ia = 0; ia < A; ia++) {
       const a0 = iu * (A + 1) + ia, b0 = a0 + A + 1;
-      if (hole[a0] || hole[a0 + 1] || hole[b0] || hole[b0 + 1]) continue;
       idx.push(a0, a0 + 1, b0, a0 + 1, b0 + 1, b0);
     }
   const crownGeo = new THREE.BufferGeometry();
@@ -1600,107 +2025,19 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
   crownGeo.computeVertexNormals();
   const mat = accMat(color, 0.6, { clearcoat: 0.2, side: THREE.DoubleSide });
   const darker = new THREE.Color(color).multiplyScalar(0.72).getHex();
-  // new: two-tone trucker style — colored front panel, clean white sides/back
-  const trimMat = isNew ? accMat(0xf7f4ee, 0.55, { clearcoat: 0.2 }) : mat;
-  if (isNew) {
-    const cols = new Float32Array((pos.length / 3) * 3);
-    const cMain = new THREE.Color(color);
-    const cSide = new THREE.Color(0xf7f4ee);
-    for (let v = 0; v < pos.length / 3; v++) {
-      const ia = v % (A + 1);
-      const a = Math.atan2(Math.sin(-Math.PI + (2 * Math.PI * ia) / A), Math.cos(-Math.PI + (2 * Math.PI * ia) / A));
-      const c = Math.abs(a) < 0.8 ? cMain : cSide;
-      cols[v * 3] = c.r;
-      cols[v * 3 + 1] = c.g;
-      cols[v * 3 + 2] = c.b;
-    }
-    crownGeo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
-    g.add(new THREE.Mesh(crownGeo, accMat(0xffffff, 0.55, { clearcoat: 0.25, side: THREE.DoubleSide, vertexColors: true })));
-  } else {
-    g.add(new THREE.Mesh(crownGeo, mat));
-  }
-  // stitched cuff along the exact ear-hole outline (marching squares on the crown grid)
-  {
-    const id = (iu: number, ia: number) => iu * (A + 1) + ia;
-    const pts = new Map<string, THREE.Vector3>();
-    const cross = (key: string, i: number, j: number) => {
-      if (!pts.has(key)) {
-        const t = fv[i] / (fv[i] - fv[j]);
-        pts.set(key, PV[i].clone().lerp(PV[j], t));
-      }
-      return key;
-    };
-    const adj = new Map<string, string[]>();
-    const link = (a2: string, b2: string) => {
-      (adj.get(a2) ?? adj.set(a2, []).get(a2)!).push(b2);
-      (adj.get(b2) ?? adj.set(b2, []).get(b2)!).push(a2);
-    };
-    for (let iu = 0; iu < U; iu++)
-      for (let ia = 0; ia < A; ia++) {
-        const c0 = id(iu, ia), c1 = id(iu, ia + 1), c2 = id(iu + 1, ia + 1), c3 = id(iu + 1, ia);
-        const E: string[] = [];
-        const ia1 = (ia + 1) % A;
-        if (fv[c0] < 0 !== fv[c1] < 0) E.push(cross(`h${iu}:${ia}`, c0, c1));
-        if (fv[c1] < 0 !== fv[c2] < 0) E.push(cross(`v${iu}:${ia1}`, c1, c2));
-        if (fv[c3] < 0 !== fv[c2] < 0) E.push(cross(`h${iu + 1}:${ia}`, c3, c2));
-        if (fv[c0] < 0 !== fv[c3] < 0) E.push(cross(`v${iu}:${ia}`, c0, c3));
-        if (E.length === 2) link(E[0], E[1]);
-        else if (E.length === 4) {
-          link(E[0], E[1]);
-          link(E[2], E[3]);
-        }
-      }
-    const seen = new Set<string>();
-    const centre = toLocal(Cb.clone());
-    for (const start of adj.keys()) {
-      if (seen.has(start)) continue;
-      // walk to one end (or around a loop)
-      let cur = start, prev = "";
-      for (let guard = 0; guard < 5000; guard++) {
-        const nb = (adj.get(cur) ?? []).filter((k) => k !== prev);
-        if (nb.length === 0 || nb[0] === start) break;
-        if ((adj.get(cur) ?? []).length < 2) break;
-        prev = cur;
-        cur = nb[0];
-        if (cur === start) break;
-      }
-      const chain: string[] = [];
-      const s0 = cur;
-      prev = "";
-      for (let guard = 0; guard < 5000; guard++) {
-        chain.push(cur);
-        seen.add(cur);
-        const nb = (adj.get(cur) ?? []).filter((k) => k !== prev && !seen.has(k));
-        if (nb.length === 0) break;
-        prev = cur;
-        cur = nb[0];
-      }
-      const closed = chain.length > 3 && (adj.get(chain[chain.length - 1]) ?? []).includes(s0);
-      if (chain.length < 4) continue;
-      const line = chain.map((k) => {
-        const p0 = pts.get(k)!.clone();
-        return p0.add(p0.clone().sub(centre).normalize().multiplyScalar(0.004));
-      });
-      // light smoothing
-      const sm = line.map((p0, i) => {
-        const a2 = line[(i - 1 + line.length) % line.length], b2 = line[(i + 1) % line.length];
-        if (!closed && (i === 0 || i === line.length - 1)) return p0;
-        return p0.clone().multiplyScalar(0.5).addScaledVector(a2, 0.25).addScaledVector(b2, 0.25);
-      });
-      g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(sm, closed), Math.max(16, sm.length * 2), 0.024 * HS, 8, closed), trimMat));
-    }
-  }
+  // A classic solid-colour baseball cap, rather than a two-tone trucker cap.
+  const trimMat = mat;
+  g.add(new THREE.Mesh(crownGeo, mat));
   // rolled bottom band (also hides the edge)
   const band: THREE.Vector3[] = [];
   for (let ia = 0; ia < A; ia++) band.push(surf(-Math.PI + (2 * Math.PI * ia) / A, 0.0, 0.004).p);
   g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(band, true), 192, 0.018 * HS, 8, true), trimMat));
-  // stitched panel seams (skip the ones that would cross an ear hole)
+  // stitched panel seams
   const seamMat = accMat(darker, 0.7, { clearcoat: 0 });
   for (const a of isNew ? [-2.62, -1.57, -0.52, 0.52, 1.57, 2.62] : [-2.6, -0.42, 0.42, 2.6, Math.PI]) {
     const pts: THREE.Vector3[] = [];
     for (let k = 0; k <= 16; k++) {
       const v = surf(a, 0.04 + (k / 16) * 0.93, 0.003);
-      if (inEar(v.pb)) break;
       pts.push(v.p);
     }
     if (pts.length > 3)
@@ -1720,7 +2057,7 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
   }
   // paw logo on the front panel (new: embroidered patch style — white patch + colored paw)
   const white = accMat(0xf7f4ee, 0.5);
-  const lp = surf(0, isNew ? 0.32 : 0.28, 0.004);
+  const lp = surf(0, isNew ? 0.22 : 0.28, 0.025 * HS);
   const logo = new THREE.Group();
   logo.position.copy(lp.p);
   logo.lookAt(lp.p.clone().add(lp.n));
@@ -1751,7 +2088,6 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
   if (isNew) {
     for (const a of [-2.1, -1.05, 1.05, 2.1, Math.PI]) {
       const v = surf(a, 0.55, 0.002);
-      if (inEar(v.pb)) continue;
       const holder = new THREE.Group();
       holder.position.copy(v.p);
       holder.lookAt(v.p.clone().add(v.n));
@@ -1779,9 +2115,9 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
     }
   }
   // brim: grows out of the front edge, gently curved, sits ABOVE the eyes
-  // new: much bigger & longer, dipping down toward the tip like a real baseball brim
+  // A rounded projecting bill with a subtle downward curve.
   const AB = isNew ? 1.02 : 0.95, NB = 44, MB = 8;
-  const Lmax = (isNew ? 0.62 : 0.43) * HS, bth = (isNew ? 0.034 : 0.03) * HS;
+  const Lmax = (isNew ? 0.46 : 0.43) * HS, bth = (isNew ? 0.034 : 0.03) * HS;
   const topV: THREE.Vector3[][] = [];
   for (let i = 0; i <= NB; i++) {
     const a = -AB + (2 * AB * i) / NB;
@@ -1794,7 +2130,7 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
       const t = j / MB;
       const v = root.clone().addScaledVector(out, L * t);
       v.y += isNew
-        ? (-0.03 * t - 0.13 * t * t - 0.08 * k * k * t) * HS // dips down toward the tip
+        ? (0.015 * t - 0.035 * t * t - 0.045 * k * k * t) * HS // gently curved bill, kept clear of the eyes
         : (0.02 * t - 0.09 * k * k * t) * HS; // nearly flat in the middle, curls down at the sides
       row.push(v);
     }
@@ -1816,13 +2152,13 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
     return geo;
   };
   g.add(new THREE.Mesh(strip(0, true), accMat(color, 0.55)));
-  g.add(new THREE.Mesh(strip(-bth, false), isNew ? accMat(0xf7f4ee, 0.6, { clearcoat: 0.1 }) : accMat(darker, 0.7, { clearcoat: 0 })));
+  g.add(new THREE.Mesh(strip(-bth, false), accMat(darker, 0.7, { clearcoat: 0 })));
   const edge: THREE.Vector3[] = [];
   for (let i = 0; i <= NB; i++) edge.push(topV[i][MB].clone().setY(topV[i][MB].y - bth / 2));
   g.add(
     new THREE.Mesh(
       new THREE.TubeGeometry(new THREE.CatmullRomCurve3(edge), 88, bth * (isNew ? 0.62 : 0.55), 8, false),
-      isNew ? accMat(0xf7f4ee, 0.55) : accMat(color, 0.55)
+      accMat(color, 0.55)
     )
   );
   // brim stitch lines (new only)
@@ -1830,7 +2166,7 @@ function makeCap(color: number, hs: Shape[], style: "old" | "new" = "old"): Acce
     for (const jj of [MB - 2, MB - 4]) {
       const line: THREE.Vector3[] = [];
       for (let i = 0; i <= NB; i++) line.push(topV[i][jj].clone().setY(topV[i][jj].y + 0.004));
-      g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(line), 88, 0.006 * HS, 5, false), accMat(0xf7f4ee, 0.6, { clearcoat: 0 })));
+      g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(line), 88, 0.006 * HS, 5, false), accMat(darker, 0.7, { clearcoat: 0 })));
     }
   }
   return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
@@ -1857,14 +2193,21 @@ function makeHelmet(color: number, hs: Shape[]): AccessoryBuild {
   const Rx = Math.max((0.67 + 0.03 * (j - 1)) * HS * K, ((mx.x - mn.x) / 2) * fit);
   const Ry = Math.max((0.68 + 0.05 * (j - 1)) * HS * K, ((mx.y - mn.y) / 2) * fit);
   const Rz = Math.max(0.7 * HS * K, ((mx.z - mn.z) / 2) * fit + 0.03 * HS);
-  /** radial bulge: the chin bar pushes the lower front of the shell forward */
-  const bulge = (yaw: number, pitch: number) => {
-    const c = Math.max(0, Math.cos(yaw));
-    return 1 + 0.13 * Math.exp(-Math.pow((pitch + 0.62) / 0.27, 2)) * Math.pow(c, 2.2);
-  };
+  // A gently squared shell with straighter sides and a tapered lower edge.
+  // The chin bar projects forward without inflating the whole lower helmet.
+  const signedPow = (v: number, exponent: number) => Math.sign(v) * Math.pow(Math.abs(v), exponent);
   const at = (yaw: number, pitch: number, k = 1) => {
-    const b = bulge(yaw, pitch) * k;
-    return new THREE.Vector3(C.x + Math.sin(yaw) * Math.cos(pitch) * Rx * b, C.y + Math.sin(pitch) * Ry * b, C.z + Math.cos(yaw) * Math.cos(pitch) * Rz * b);
+    const cp = Math.cos(pitch);
+    const x = Math.sin(yaw) * cp;
+    const y = Math.sin(pitch);
+    const z = Math.cos(yaw) * cp;
+    const lower = THREE.MathUtils.smoothstep(-pitch, 0.28, 1.06);
+    const chin = 0.07 * Math.exp(-Math.pow((pitch + 0.6) / 0.25, 2)) * Math.pow(Math.max(0, Math.cos(yaw)), 3);
+    return new THREE.Vector3(
+      C.x + signedPow(x, 0.82) * Rx * (1.035 - 0.06 * lower) * k,
+      C.y + signedPow(y, 0.86) * Ry * k,
+      C.z + signedPow(z, 0.82) * Rz * (1 + chin) * k,
+    );
   };
   const shell = accMat(color, 0.22, { clearcoat: 1, clearcoatRoughness: 0.06, side: THREE.DoubleSide });
   const dark = accMat(0x24252e, 0.65, { clearcoat: 0.2 });
@@ -1887,8 +2230,8 @@ function makeHelmet(color: number, hs: Shape[]): AccessoryBuild {
       if (!keep(yaw, pitch)) continue;
       for (let q = 0; q < 3; q++) {
         const vx = pa.getX(i + q), vy = pa.getY(i + q), vz = pa.getZ(i + q);
-        const b = bulge(Math.atan2(vx, vz), Math.asin(Math.max(-1, Math.min(1, vy)))) * k;
-        out.push(C.x + vx * Rx * b, C.y + vy * Ry * b, C.z + vz * Rz * b);
+        const p = at(Math.atan2(vx, vz), Math.asin(Math.max(-1, Math.min(1, vy))), k);
+        out.push(p.x, p.y, p.z);
       }
     }
     const geo = new THREE.BufferGeometry();
@@ -1908,7 +2251,8 @@ function makeHelmet(color: number, hs: Shape[]): AccessoryBuild {
       for (let q = 0; q <= M; q++) {
         const xw = x0 + ((x1 - x0) * q) / M;
         const d = new THREE.Vector3(Math.sin(xw), Math.cos(xw) * Math.sin(phi), Math.cos(xw) * Math.cos(phi));
-        ps.push(C.x + d.x * Rx * k, C.y + d.y * Ry * k, C.z + d.z * Rz * k);
+        const p = at(Math.atan2(d.x, d.z), Math.asin(THREE.MathUtils.clamp(d.y, -1, 1)), k);
+        ps.push(p.x, p.y, p.z);
       }
     }
     for (let i = 0; i < N; i++)
@@ -1925,12 +2269,34 @@ function makeHelmet(color: number, hs: Shape[]): AccessoryBuild {
   g.add(stripe(-0.11, 0.11, white, 1.008));
   g.add(stripe(0.14, 0.175, accent, 1.008));
   g.add(stripe(-0.175, -0.14, accent, 1.008));
-  // chin vent grille
-  for (const s of [-1, 0, 1]) {
-    const v = new THREE.Mesh(new THREE.CapsuleGeometry(0.012 * HS, 0.07 * HS, 4, 8), dark);
-    v.position.copy(at(s * 0.14, WB - 0.28, 1.005));
-    v.lookAt(at(s * 0.14, WB - 0.28, 2));
-    g.add(v);
+  // A recessed, rounded trapezoid with horizontal slats reads as a
+  // motorcycle helmet's chin intake rather than marks on a round shell.
+  const ventPoints: number[] = [], ventIndices: number[] = [];
+  const ventRows = 8, ventCols = 24;
+  for (let row = 0; row <= ventRows; row++) {
+    const t = row / ventRows;
+    const pitch = -0.49 - t * 0.26;
+    const width = (0.24 - 0.07 * t) * (0.94 + 0.06 * Math.sin(Math.PI * t));
+    for (let col = 0; col <= ventCols; col++) {
+      const yaw = (2 * col / ventCols - 1) * width;
+      const p = at(yaw, pitch, 1.018);
+      ventPoints.push(p.x, p.y, p.z);
+    }
+  }
+  for (let row = 0; row < ventRows; row++) for (let col = 0; col < ventCols; col++) {
+    const i = row * (ventCols + 1) + col;
+    ventIndices.push(i, i + ventCols + 1, i + 1, i + 1, i + ventCols + 1, i + ventCols + 2);
+  }
+  const ventGeo = new THREE.BufferGeometry();
+  ventGeo.setAttribute("position", new THREE.Float32BufferAttribute(ventPoints, 3));
+  ventGeo.setIndex(ventIndices);
+  ventGeo.computeVertexNormals();
+  g.add(new THREE.Mesh(ventGeo, accMat(0x24252e, 0.65, { side: THREE.DoubleSide })));
+  const slatMat = accMat(0x858995, 0.6, { clearcoat: 0 });
+  for (const [pitch, width] of [[-0.55, 0.18], [-0.62, 0.16], [-0.69, 0.13]] as const) {
+    const points: THREE.Vector3[] = [];
+    for (let i = 0; i <= 8; i++) points.push(at(-width + 2 * width * i / 8, pitch, 1.035));
+    g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 16, 0.008 * HS, 5, false), slatMat));
   }
   // rubber gasket around the eye port
   const rim: THREE.Vector3[] = [];
@@ -1994,6 +2360,10 @@ function makeHelmet(color: number, hs: Shape[]): AccessoryBuild {
   const bot: THREE.Vector3[] = [];
   for (let k = 0; k < 72; k++) bot.push(at((k / 72) * Math.PI * 2, BOT, 1.0));
   g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(bot, true), 144, 0.045 * HS, 10, true), dark));
+  // Scale around the fitted head centre, not the bone origin, so all helmet
+  // parts grow exactly 5% together without shifting off the face.
+  g.scale.setScalar(1.05);
+  g.position.copy(C).multiplyScalar(1 - 1.05);
   return { group: shadowed(g), torsoGroup: null, googly: [], detachable: false };
 }
 
@@ -2002,9 +2372,9 @@ function buildAccessory(kind: AccessoryId, hs: Shape[], torso: Shape[] = []): Ac
   SCARF_TORSO = torso;
   switch (kind) {
     case "capRed":
-      return makeCap(0xe8343c, hs);
+      return makeCapNew(0xe8343c, hs);
     case "capBlue":
-      return makeCap(0x2f6fe0, hs);
+      return makeCapNew(0x2f6fe0, hs);
     case "capNewRed":
       return makeCapNew(0xe8343c, hs);
     case "capNewBlue":
@@ -2029,6 +2399,7 @@ export interface CharacterVisual {
   legL: THREE.Bone;
   legR: THREE.Bone;
   mesh: THREE.SkinnedMesh;
+  uncoveredGeometry: THREE.BufferGeometry | null; // restore ears when a cap is knocked off
   eyesNormal: THREE.Group;
   eyesKO: THREE.Group;
   eyesHurt: THREE.Group;
@@ -2047,8 +2418,10 @@ export function warmCharacter(def: AnimalDef) {
   getAsset(def);
 }
 
-export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "none"): CharacterVisual {
-  const asset = getAsset(def, accessory === "helmet");
+export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "none", eyeStyle: EyeStyleId = "default", expression: ExpressionId = "default"): CharacterVisual {
+  const isCap = accessory.startsWith("cap");
+  const asset = getAsset(def, accessory === "helmet" || isCap);
+  const uncoveredGeometry = isCap ? getAsset(def).geometry : null;
   const bones = PARTS.map((name, i) => {
     const b = new THREE.Bone();
     b.name = name;
@@ -2073,7 +2446,7 @@ export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "n
   const eyesHurt = new THREE.Group();
   X_HURT = eyesHurt;
   X_PUPILS = [];
-  buildFace(asset.recipe, bones[1], bones[0], eyesNormal, eyesKO);
+  buildFace(asset.recipe, bones[1], bones[0], eyesNormal, eyesKO, eyeStyle, expression);
   eyesHurt.visible = false;
   bones[1].add(eyesHurt);
   const find = (n: string) => bones[1].getObjectByName(n) ?? new THREE.Group();
@@ -2083,6 +2456,10 @@ export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "n
     asset.recipe.shapes.filter((sh) => sh.part === PI.torso)
   );
   if (acc) {
+    if (!acc.googly.length) {
+      batchRigidDetails(acc.group);
+      if (acc.torsoGroup) batchRigidDetails(acc.torsoGroup);
+    }
     bones[1].add(acc.group);
     if (acc.torsoGroup) bones[0].add(acc.torsoGroup);
     if (accessory === "helmet") bones[1].traverse((o) => o.name === "whisker" && (o.visible = false));
@@ -2096,6 +2473,7 @@ export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "n
     legL: bones[4],
     legR: bones[5],
     mesh,
+    uncoveredGeometry,
     eyesNormal,
     eyesKO,
     eyesHurt,
@@ -2116,15 +2494,52 @@ export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "n
 const _q = new THREE.Quaternion();
 const _e = new THREE.Euler();
 const _v = new THREE.Vector3();
-function setLimb(bone: THREE.Bone, pivot: V3, base: THREE.Vector3, rx: number, rz: number) {
+const _palmTurn = new THREE.Quaternion();
+const _upAxis = new THREE.Vector3(0, 1, 0);
+function setLimb(bone: THREE.Bone, pivot: V3, base: THREE.Vector3, rx: number, rz: number, ry = 0) {
   _e.set(rx, 0, rz);
   _q.setFromEuler(_e);
+  if (ry) _q.multiply(_palmTurn.setFromAxisAngle(_upAxis, ry));
   _v.set(rig.LIMB_TOP[0], rig.LIMB_TOP[1], rig.LIMB_TOP[2]).applyQuaternion(_q);
   bone.position.set(base.x + pivot[0] - _v.x, base.y + pivot[1] - _v.y, base.z + pivot[2] - _v.z);
   bone.quaternion.copy(_q);
 }
 
-export function poseStatic(v: CharacterVisual, t: number, wave = false) {
+/** A quick natural blink with a short hold and a softer reopening. */
+/** Free per-instance details without destroying shared cached skin geometry/materials. */
+export function disposeCharacterDetails(roots: THREE.Object3D[]) {
+  const geometries = new Set<THREE.BufferGeometry>();
+  const materials = new Set<THREE.Material>();
+  const skeletons = new Set<THREE.Skeleton>();
+  for (const root of roots) root.traverse(o => {
+    if (!(o instanceof THREE.Mesh)) return;
+    if (o instanceof THREE.SkinnedMesh) { skeletons.add(o.skeleton); return; }
+    geometries.add(o.geometry);
+    for (const material of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (!sharedMaterials.has(material)) materials.add(material);
+    }
+  });
+  for (const geometry of geometries) geometry.dispose();
+  for (const material of materials) material.dispose();
+  for (const skeleton of skeletons) skeleton.dispose();
+}
+
+export function animateBlink(v: CharacterVisual, time: number, phase = 0) {
+  const t = (time + phase) % 4.6;
+  let openness = 1;
+  if (t < 0.09) openness = 1 - t / 0.09;
+  else if (t < 0.14) openness = 0;
+  else if (t < 0.29) openness = (t - 0.14) / 0.15;
+  for (const eye of v.eyesNormal.children) eye.scale.y = Math.max(0.035, openness);
+}
+
+export function poseStatic(v: CharacterVisual, t: number) {
+  animateBlink(v, t, 0.6);
+  const gx = Math.sin(t * 1.15) * 0.7 + Math.sin(t * 2.8) * 0.18;
+  const gy = Math.sin(t * 0.8 + 0.7) * 0.5;
+  for (const p of v.pupils) {
+    setPupilGaze(p, gx, gy);
+  }
   const bob = Math.sin(t * 3) * 0.02;
   const base = new THREE.Vector3(0, rig.HOVER + bob, 0);
   v.torso.position.copy(base);
@@ -2132,10 +2547,14 @@ export function poseStatic(v: CharacterVisual, t: number, wave = false) {
   v.head.position.set(0, rig.HOVER + rig.HEAD_OFFSET + bob * 1.3, 0);
   _e.set(Math.sin(t * 1.3) * 0.04, Math.sin(t * 0.9) * 0.08, Math.sin(t * 1.7) * 0.07);
   v.head.quaternion.setFromEuler(_e);
-  const sway = Math.sin(t * 2) * 0.06;
-  if (wave) setLimb(v.armL, rig.SHOULDER_L, base, -0.2, 1.75 + Math.sin(t * 9) * 0.28);
-  else setLimb(v.armL, rig.SHOULDER_L, base, 0.12, 0.42 + sway);
-  setLimb(v.armR, rig.SHOULDER_R, base, 0.12, -0.42 - sway);
+  // A relaxed, near-vertical stance instead of a continuous wave / T-pose.
+  // The small shoulder spread keeps the paws clear of the rounded body.
+  const sway = Math.sin(t * 1.6) * 0.025;
+  // Palms naturally face inwards; their existing markings remain on the palm.
+  const palmTurn = getShapeMode() === "figure" ? 1.1 : 0;
+  const armSpread = getShapeMode() === "figure" ? 0.37 : 0.39;
+  setLimb(v.armL, rig.SHOULDER_L, base, 0.08, armSpread + sway, -palmTurn);
+  setLimb(v.armR, rig.SHOULDER_R, base, 0.08, -armSpread - sway, palmTurn);
   setLimb(v.legL, rig.HIP_L, base, 0, 0.04);
   setLimb(v.legR, rig.HIP_R, base, 0, -0.04);
 }
