@@ -128,7 +128,7 @@ const hr = (x: number, y: number, z: number): V3 => [x * HS, y * HS, z * HS];
  *  Signed distance primitives
  * ===================================================================== */
 interface Shape {
-  t: 0 | 1 | 2 | 3 | 4 | 5; // ellipsoid | round cone | slab | tube | rounded box | face patch
+  t: 0 | 1 | 2 | 3 | 4 | 5 | 6; // ellipsoid | round cone | slab | tube | rounded box | face patch | front column
   part: number;
   k: number; // smooth-union radius
   col: THREE.Color;
@@ -247,6 +247,21 @@ function fpatch(part: PartName, c: V3, rx: number, ry: number, halfZ = 0.3): Sha
   s.br = Math.max(rx, ry, halfZ);
   return s;
 }
+/**
+ * An upright elliptical column that only exists in front of `c[2]`. This is
+ * exactly how the exported sculpt's belly mask works (ellipse in x/y, z > 0.1),
+ * so the white patch keeps a clean edge on the flanks instead of the ragged
+ * smear a z-banded patch leaves there.
+ */
+function frontColumn(part: PartName, cx: number, cy: number, zMin: number, rx: number, ry: number): Shape {
+  const s = blank(part, 0, 0, 0.02);
+  s.t = 6;
+  s.c = [cx, cy, zMin];
+  s.r = [rx, ry, 0];
+  s.bc = [cx, cy, zMin];
+  s.br = Math.max(rx, ry, 1);
+  return s;
+}
 function slab(c: V3, n: V3, th: number, R: number): Shape {
   const s = blank("torso", 0, 0, 0.02);
   s.t = 2;
@@ -267,6 +282,12 @@ function shapeDist(s: Shape, x: number, y: number, z: number): number {
     const k1 = Math.sqrt(qx * qx + qy * qy + qz * qz);
     if (k1 < 1e-9) return -Math.min(s.r[0], s.r[1], s.r[2]);
     return (k0 * (k0 - 1)) / k1;
+  }
+  if (s.t === 6) {
+    const dx = (x - s.c[0]) / s.r[0];
+    const dy = (y - s.c[1]) / s.r[1];
+    const flat = (Math.sqrt(dx * dx + dy * dy) - 1) * Math.min(s.r[0], s.r[1]);
+    return Math.max(flat, s.c[2] - z);
   }
   if (s.t === 5) {
     // elliptical disc: radial distance to the ellipse edge, intersected with
@@ -750,7 +771,10 @@ class Cat {
       this.stroke(pts, r0, r1, stripe, soft);
     };
     for (const ay of [1.15, 0.995, 0.84, 0.69, 0.545]) {
-      for (const s of [1, -1] as const) ring(SY(ay), 42, 146, s, 0.018, 0.026, 0.012);
+      // Start at ~74° from the front. The exported cat's flank mask begins at
+      // |angle| 1.32 rad; anything closer to the front laid the stripe ends
+      // right on the belly rim and they read as dark specks in the white.
+      for (const s of [1, -1] as const) ring(SY(ay), 74, 150, s, 0.018, 0.026, 0.012);
     }
     this.stroke([this.bodyAt(180, SY(0.62)), this.bodyAt(180, SY(0.95)), this.bodyAt(180, SY(1.28))], 0.017, 0.013, stripe, soft);
     // ── arms: three rings on the upper arm (asset t .2 / .365 / .53) ──
@@ -771,10 +795,21 @@ class Cat {
     // The exported cat's belly ellipse is 0.318 x 0.376 and runs from the
     // crotch all the way up to the neck, so it is taller and sits higher than
     // the old plush bib.
-    this.paint(
-      ell("torso", [0, ty(0.01), 0.29 + 0.1 * (TU.belly - 1)], [0.218, 0.256, 0.25]),
-      white, 0.006, 1, PI.torso,
-    );
+    // A flat disc hugging the barrel: an ellipsoid buried in the chest can
+    // only paint the very front of it, which is why the white patch stayed
+    // narrow and its outline stayed jagged. The disc reaches the flanks like
+    // the sculpt's own z > 0.1 mask, and its edge follows a smooth ellipse.
+    // Asset mask: ellipse 0.318 x 0.376 in x/y, everything in front of z 0.1.
+    // Using the same construction keeps a crisp edge on the flanks, where a
+    // z-banded patch smeared into the stripes.
+    this.paint(frontColumn("torso", 0, ty(-0.03), 0.085, 0.27, 0.222), white, 0.011, 1, PI.torso);
+    // Fluffy rim: a ring of small soft blobs wobbles the outline the way the
+    // sculpt's noise mask does, so the patch reads as fur, not a sticker.
+    for (let i = 0; i < 22; i++) {
+      const a = (i / 22) * Math.PI * 2;
+      const jx = 0.93 + 0.05 * Math.sin(i * 3.1), jy = 0.93 + 0.05 * Math.cos(i * 2.3);
+      this.paint(frontColumn("torso", Math.cos(a) * 0.27 * jx, ty(-0.03) + Math.sin(a) * 0.222 * jy, 0.085, 0.042, 0.038), white, 0.02, 1, PI.torso);
+    }
     // ── white mittens and socks: a clean cuff line, like the asset's
     //    "armT > 0.73" / "y < 0.268" colour masks ──
     for (const a of ["armL", "armR"] as const) {
@@ -802,12 +837,17 @@ class Cat {
     const F = 0.55;
     const patch = (x: number, y: number, rx: number, ry: number, z = F, sft = soft) =>
       this.paint(fpatch("head", hd(x, y, z), hr(rx, ry, 0.2)[0], hr(rx, ry, 0.2)[1], hr(rx, ry, 0.2)[2]), col, sft, 1, PI.head);
-    // wide oval around the mouth (asset: y -0.37 … -0.15 in head units)
-    patch(0, -0.25, 0.22, 0.115);
-    // fluffy cheeks flanking it
-    for (const s of [1, -1] as const) patch(s * 0.16, -0.27, 0.105, 0.085, F - 0.005, 0.012);
-    // chin tuft hanging under the mouth
-    patch(0, -0.4, 0.11, 0.075, F - 0.015);
+    // One wide "ω" mask: a broad cap across the muzzle with a big round chin
+    // lobe hanging under it, exactly the silhouette of the sculpt's own mask.
+    patch(0, -0.205, 0.205, 0.086);
+    patch(0, -0.29, 0.126, 0.092, F - 0.012);
+    // the cap widens a touch towards the cheeks
+    for (const s of [1, -1] as const) patch(s * 0.15, -0.215, 0.06, 0.056, F - 0.004, 0.014);
+    // fluffy rim (same trick as the belly)
+    for (let i = 0; i < 12; i++) {
+      const a = Math.PI * (0.03 + (i / 11) * 0.94);
+      patch(Math.cos(a) * 0.205 * 0.92, -0.215 + Math.sin(a) * 0.096, 0.04, 0.036, F, 0.018);
+    }
   }
   limbBands(col: number) {
     for (const a of ["armL", "armR"] as const) {
@@ -1253,8 +1293,18 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   }
   // A gently grounded sole on the figurine rather than ball-shaped feet.
   // Cut only the body mesh in bind space; the separate hands remain untouched.
+  // Crotch slit: the sculpt's legs are two separate columns, so their inner
+  // walls stay visible all the way up to the belly. Our pelvis volume used to
+  // fill that gap, which is why the game cat had no notch between the legs.
+  const assetShape = getShapeMode() === "asset";
+  const notch = assetShape
+    ? cone("torso", [0, -0.30, 0.005], [0, -0.80, 0.005], 0.022, 0.062, 0.02)
+    : null;
   const sdf = (x: number, y: number, z: number) => {
     let d = sceneDist(shapes, x, y, z);
+    if (notch && !rigid && y < -0.22 && Math.abs(x) < 0.16) {
+      d = -smin(-d, shapeDist(notch, x, y, z), 0.03);
+    }
     if (figure && !rigid) {
       d = Math.max(d, -rig.HOVER + 0.003 - y);
       for (const g of grooves) {

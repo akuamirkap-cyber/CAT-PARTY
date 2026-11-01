@@ -7,7 +7,7 @@ import type { ControlState } from "./input";
 import { sfx } from "./audio";
 import * as rig from "./rig";
 import { getRigTuning, getShapeMode } from "./tuning";
-import { stabilizeArmRotation } from "./armMotion";
+import { ARM_BOW_TWIST, bowTarget, stabilizeArmRotation } from "./armMotion";
 import { PUNCH_DURATION, PUNCH_WINDUP, punchPose } from "./punchMotion";
 import { POUNCE_DURATION, pouncePose } from "./pounceMotion";
 import { SWING_DURATION, SWING_STRIKE_END, SWING_WINDUP, segmentDistanceSquared, sweptSegmentDistanceSquared, weaponSwingPose } from "./weaponMotion";
@@ -111,6 +111,8 @@ const PUNCH_T = PUNCH_DURATION;
 const PUNCH_WIND = PUNCH_WINDUP;
 const PUNCH_STRIKE0 = PUNCH_T - PUNCH_WIND; // timer value where the strike starts
 const _hq = new CANNON.Quaternion();
+const _bowL = new CANNON.Vec3();
+const _bowR = new CANNON.Vec3();
 const _hq2 = new CANNON.Quaternion();
 const _tq = new THREE.Quaternion();
 const _m4 = new THREE.Matrix4();
@@ -158,6 +160,10 @@ const _armCorrection = new THREE.Quaternion();
 const _armIdentity = new THREE.Quaternion();
 const _palmOrientation = new THREE.Quaternion();
 const _palmAxis = new THREE.Vector3(0, 1, 0);
+const _hangGoal = new THREE.Quaternion();
+const _hangEuler = new THREE.Euler();
+const _hangTorso = new THREE.Quaternion();
+const _hangDown = new THREE.Vector3(0, -1, 0);
 const _kd = new CANNON.Vec3();
 const SYNC_BODIES = ["torso", "head", "armL", "armR", "legL", "legR"] as const;
 const LIMB_SOCKETS = ["armL", "armR", "legL", "legR"] as const;
@@ -330,11 +336,16 @@ export class Character {
       this.pawR = 0.112 * tu.armTip * 0.92;
       // paw, forearm and (thinner) upper part of the arm, in arm-local space
       // only points that can always be resolved (the shoulder ball itself is meant to sit inside the body)
+      // The asset-shaped arm hangs right beside the belly, exactly like the
+      // menu pose, and that pose accepts a couple of centimetres of overlap.
+      // Demanding a full paw radius pushes the hanging arm out to ~17 degrees,
+      // which reads as a stiff, bow-legged stance in game.
+      const snug = getShapeMode() === "asset" ? 0.55 : 1;
       this.armPts = [
-        { y: AYf(-0.205), r: this.pawR, x: 0 },
-        { y: AYf(-0.11), r: 0.075 * tu.armRoot * 0.7, x: 0 },
+        { y: AYf(-0.205), r: this.pawR * snug, x: 0 },
+        { y: AYf(-0.11), r: 0.075 * tu.armRoot * 0.7 * snug, x: 0 },
         // the elbow sits on the baked outward bow of the asset arm
-        { y: AYf(-0.07), r: 0.072 * tu.armRoot * 0.7, x: 0.19 },
+        { y: AYf(-0.07), r: 0.072 * tu.armRoot * 0.7 * snug, x: 0.19 },
       ];
     }
     this.buildBodies(spawn, yaw);
@@ -1496,8 +1507,11 @@ export class Character {
         // The asset-shaped cat has a wide barrel, so a relaxed paw has to hang a
         // little further out (and less far forward) than the plush default,
         // otherwise the arm slides inside the belly.
-        const out = (getShapeMode() === "asset" ? 0.14 : 0.17) + 0.03 * run;
-        const fwd = getShapeMode() === "asset" ? 0.02 : 0.05;
+        // Menu pose keeps the arms hanging right beside the belly, so the
+        // asset shape uses the same tight spread here; pushOut() still lifts
+        // a paw out of the body whenever the torso turns into it.
+        const out = (getShapeMode() === "asset" ? 0.018 : 0.17) + 0.03 * run;
+        const fwd = getShapeMode() === "asset" ? -0.01 : 0.05;
         tx += side.x * s * out + f.x * (fwd + swing);
         tz += side.z * s * out + f.z * (fwd + swing);
         ty += -0.33 + breathe + run * (0.1 + Math.max(0, swing) * 0.55);
@@ -1506,7 +1520,12 @@ export class Character {
       // never aim a paw inside our own body / head (the PD would fight the self-collision)
       _sw.set(tx, ty, tz);
       t.pointToLocalFrame(_sw, _sl);
-      if (rig.pushOut(_sl, this.pawR + 0.015, this.vols.torso)) {
+      // The asset-shaped cat hangs its paws right beside the belly, exactly
+      // like the menu pose (only ~3-4 degrees out). A full paw-radius clearance
+      // here shoved both arms out by ~17 degrees, which is what made the same
+      // cat look stiff and bow-legged in game.
+      const clearance = getShapeMode() === "asset" ? this.pawR * 0.12 : this.pawR + 0.015;
+      if (rig.pushOut(_sl, clearance, this.vols.torso)) {
         t.pointToWorldFrame(_sl, _sw);
         tx = _sw.x;
         ty = _sw.y;
@@ -2084,8 +2103,15 @@ export class Character {
   /** Per sub-step hold maintenance (break / lift assist). */
   updateHolds(h: number) {
     this.selfCollide();
-    stabilizeArmRotation(this.armL, this.torso, h);
-    stabilizeArmRotation(this.armR, this.torso, h);
+    // Keep the same hang the menu shows: the asset cat's mittens face forward
+    // with the elbow bow out to the side, not spun 90 degrees.
+    if (getShapeMode() === "asset") {
+      stabilizeArmRotation(this.armL, this.torso, h, bowTarget(this.torso, 1, ARM_BOW_TWIST, _bowL));
+      stabilizeArmRotation(this.armR, this.torso, h, bowTarget(this.torso, -1, ARM_BOW_TWIST, _bowR));
+    } else {
+      stabilizeArmRotation(this.armL, this.torso, h);
+      stabilizeArmRotation(this.armR, this.torso, h);
+    }
     this.batHits(h);
     this.sweepPunch();
     if (this.lifting) this.liftT = Math.min(1.5, this.liftT + h / 0.38);
@@ -2205,6 +2231,25 @@ export class Character {
               _armCorrection.copy(_armIdentity);
             }
             o.quaternion.premultiply(_armCorrection);
+          }
+        }
+        // The asset cat's physics arm is pushed a few degrees outward by its
+        // own self-collision (the paw rides right beside the belly), which made
+        // it look stiff and splayed next to the relaxed menu pose. While the
+        // arm is simply hanging, ease the *rendered* arm back to the menu hang;
+        // a punch, a swing or a weapon grip is untouched.
+        if (getShapeMode() === "asset" && !this.weapon && !this.holds[limb] && !this.down) {
+          const sign = limb === "armL" ? 1 : -1;
+          _hangEuler.set(0.08, 0, sign * 0.05);
+          _hangGoal.setFromEuler(_hangEuler).multiply(_palmOrientation.setFromAxisAngle(_palmAxis, -sign * 0.32));
+          _hangTorso.set(this.torso.quaternion.x, this.torso.quaternion.y, this.torso.quaternion.z, this.torso.quaternion.w);
+          _hangGoal.premultiply(_hangTorso);
+          _armDir.set(0, HAND.y - LIMB_TOP.y, 0).applyQuaternion(o.quaternion);
+          _hangDown.copy(_armDir).normalize();
+          // how upright is the arm? 1 = hanging straight down
+          const hang = -_hangDown.y;
+          if (hang > 0.72) {
+            o.quaternion.slerp(_hangGoal, 0.55 * Math.min(1, (hang - 0.72) / 0.2));
           }
         }
         // In figurine mode the palm points inward just as in the preview.
