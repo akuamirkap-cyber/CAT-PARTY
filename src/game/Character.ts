@@ -15,6 +15,11 @@ import { SWING_DURATION, SWING_STRIKE_END, SWING_WINDUP, segmentDistanceSquared,
 export const GRAVITY = 22;
 const WALK_SPEED = 4.0;
 const RUN_SPEED = 6.6;
+/** how long a press is remembered before the character can act on it */
+const JUMP_BUFFER = 0.16;
+const PUNCH_BUFFER = 0.16;
+/** grace period after leaving the ground where a jump still counts */
+const COYOTE = 0.11;
 
 const Y = new CANNON.Vec3(0, 1, 0);
 const Z = new CANNON.Vec3(0, 0, 1);
@@ -223,6 +228,16 @@ export class Character {
   stagger = 0;
   noHover = 0;
   jumpCd = 0;
+  /**
+   * Input buffering: a press is remembered for a moment, so a button hit a few
+   * frames before the character can act still counts. Without this, tapping
+   * jump just before landing or punch just before a swing ends was silently
+   * dropped, which is what made the controls feel heavy.
+   */
+  jumpBuf = 0;
+  punchBuf = 0;
+  /** coyote time: still allowed to jump for a moment after leaving the ground */
+  coyote = 0;
   punchTimer = 0;
   punchCd = 0;
   punchArm: "armL" | "armR" = "armL";
@@ -521,6 +536,10 @@ export class Character {
     this.hurtT -= dt;
     this.updateExpr();
     this.jumpCd -= dt;
+    this.jumpBuf = Math.max(0, this.jumpBuf - dt);
+    this.punchBuf = Math.max(0, this.punchBuf - dt);
+    if (inp.jump) this.jumpBuf = JUMP_BUFFER;
+    if (inp.punch) this.punchBuf = PUNCH_BUFFER;
     this.punchCd -= dt;
     this.attackCd -= dt;
     this.contestCooldown = Math.max(0, this.contestCooldown - dt);
@@ -549,7 +568,7 @@ export class Character {
     const mlen = Math.hypot(inp.mx, inp.mz);
     if (canAct && mlen > 0.15 && this.dropkickTimer <= 0) {
       const target = Math.atan2(inp.mx, inp.mz);
-      const turnRate = this.grounded ? 13 : 6;
+      const turnRate = this.grounded ? 17 : 7;
       const d = wrapAngle(target - this.facing);
       this.facing = wrapAngle(this.facing + d * Math.min(1, dt * turnRate));
     }
@@ -572,7 +591,9 @@ export class Character {
     }
 
     // JUMP / CLIMB
-    if (inp.jump && this.jumpCd <= 0) {
+    const wantsJump = inp.jump || this.jumpBuf > 0;
+    if (wantsJump && this.jumpCd <= 0) {
+      this.jumpBuf = 0;
       if (this.hangingStatic) {
         this.releaseAll(false);
         // rise first, then the climb assist pulls us over the lip
@@ -585,7 +606,8 @@ export class Character {
         this.noHover = 0.3;
         this.jumpCd = 0.5;
         sfx.jump();
-      } else if (this.grounded && this.heldBy === 0) {
+      } else if ((this.grounded || this.coyote > 0) && this.heldBy === 0) {
+        this.coyote = 0;
         const gv = this.groundBody ? this.groundBody.velocity.y : 0;
         for (const b of this.parts) b.velocity.y = Math.max(b.velocity.y, gv) + 8.2;
         this.noHover = 0.25;
@@ -611,18 +633,26 @@ export class Character {
     }
 
     // PUNCH (or lift / throw when holding, swing when holding a bat)
-    if (inp.punch && this.weapon && this.punchCd <= 0 && this.swingTimer <= 0 && this.headbuttTimer <= 0 && this.dropkickTimer <= 0) {
+    const wantsPunch = inp.punch || this.punchBuf > 0;
+    if (wantsPunch && this.weapon && this.punchCd <= 0 && this.swingTimer <= 0 && this.headbuttTimer <= 0 && this.dropkickTimer <= 0) {
+      this.punchBuf = 0;
       if (this.weapon.kind === "bat") this.aimMeleeAtNearest(2.3);
       this.swingTimer = SWING_DURATION;
       this.swingOverhead = this.weapon.kind === "bat" && this.nextBatOverhead;
       if (this.weapon.kind === "bat") this.nextBatOverhead = !this.nextBatOverhead;
-      this.punchCd = this.weapon.kind === "pan" ? 0.72 : 0.76;
+      // Swing length is the limiter; a longer cooldown only created dead
+      // button time where a queued press was ignored.
+      this.punchCd = this.weapon.kind === "pan" ? 0.66 : 0.64;
       this.hitSet.clear();
       this.swingPropsHit.clear();
       sfx.whoosh();
-    } else if (inp.punch && !this.weapon) {
+    } else if (wantsPunch && !this.weapon) {
       if (this.holding) {
-        if (!this.lifting) {
+        // Carry/throw must stay on the live press: a buffered tap from before
+        // the cat was picked up should not fling it right away.
+        if (!inp.punch) {
+          // buffered press while carrying: ignore
+        } else if (!this.lifting) {
           // switch to "carry": the body is held above the head by a spring (arms are too short to reach)
           let any = false;
           for (const h of [this.holds.armL, this.holds.armR]) {
@@ -637,11 +667,12 @@ export class Character {
           this.releaseAll(true);
         }
       } else if (this.punchCd <= 0 && this.dropkickTimer <= 0 && this.headbuttTimer <= 0) {
+        this.punchBuf = 0;
         this.aimMeleeAtNearest(1.65);
         this.punchArm = this.punchArm === "armL" ? "armR" : "armL";
         this.punchTimer = PUNCH_T;
         this[this.punchArm].pointToWorldFrame(HAND, this.previousPunchHand);
-        this.punchCd = 0.39;
+        this.punchCd = PUNCH_DURATION;
         this.hitSet.clear();
         sfx.whoosh();
       }
@@ -1167,6 +1198,8 @@ export class Character {
     this.groundDist = hit ? rayRes.distance : 99;
     this.groundBody = hit ? rayRes.body : null;
     this.grounded = hit && this.groundDist < HOVER + 0.25 && !ko;
+    if (this.grounded) this.coyote = COYOTE;
+    else this.coyote = Math.max(0, this.coyote - h);
     if (this.grounded) this.airTime = 0;
     else this.airTime += h;
 
@@ -1219,7 +1252,7 @@ export class Character {
     const pounce = this.dropkickTimer > 0 ? pouncePose(POUNCE_DURATION - this.dropkickTimer) : null;
     let lean = 0;
     const hSpeed = Math.hypot(t.velocity.x, t.velocity.z);
-    if (this.grounded) lean = Math.min(0.18, hSpeed * 0.025);
+    if (this.grounded) lean = Math.min(0.22, hSpeed * 0.031);
     if (this.headbuttTimer > 0.12) lean = 1.8;
     if (pounce) lean = pounce.lean;
     if (punch) lean = punch.lean;
@@ -1315,14 +1348,25 @@ export class Character {
     const inp = this.input;
     let speed = (inp.run ? RUN_SPEED : WALK_SPEED) * Math.min(1, Math.hypot(inp.mx, inp.mz));
     if (this.holding) speed *= 0.65;
-    if (this.punchTimer > 0) speed *= 0.6;
+    // Attacking slows the cat a little, not a lot: being pinned in place while
+    // swinging read as sluggish.
+    if (this.punchTimer > 0) speed *= 0.78;
     if (held) speed *= 0.25;
     const mlen = Math.hypot(inp.mx, inp.mz);
     const dx = mlen > 0.1 ? (inp.mx / mlen) * speed : 0;
     const dz = mlen > 0.1 ? (inp.mz / mlen) * speed : 0;
-    let ctrl = this.grounded ? 9 : 2.2;
+    // Higher gain = the cat reaches its speed sooner and stops on a coin. A
+    // stronger gain when releasing or reversing removes the old ice-skate drift.
+    const braking = mlen <= 0.1 || (dx * t.velocity.x + dz * t.velocity.z) < 0;
+    // Brake hard only while there is speed to shed; a stiff idle stance fought
+    // the ragdoll (and shortened the punch reach).
+    const hSpeedNow = Math.hypot(t.velocity.x, t.velocity.z);
+    const attacking = this.punchTimer > 0 || this.swingTimer > 0;
+    let ctrl = this.grounded
+      ? (braking ? (hSpeedNow > 0.4 && !attacking ? 17 : 9) : 12.5)
+      : 3.1;
     if (this.stagger > 0) ctrl *= 0.3;
-    if (this.punchTimer > 0) ctrl *= 0.35;
+    if (this.punchTimer > 0) ctrl *= 0.5;
     if (this.dropkickTimer > 0 || this.headbuttTimer > 0.1 || this.weaponContest) ctrl = 0;
     if (this.hangingStatic) ctrl = 0.6;
     const gvx = this.groundBody ? this.groundBody.velocity.x : 0;
@@ -1337,8 +1381,8 @@ export class Character {
       }
       ctrl = 0;
     }
-    const ax = clamp((dx + gvx - t.velocity.x) * ctrl, -40, 40);
-    const az = clamp((dz + gvz - t.velocity.z) * ctrl, -40, 40);
+    const ax = clamp((dx + gvx - t.velocity.x) * ctrl, -55, 55);
+    const az = clamp((dz + gvz - t.velocity.z) * ctrl, -55, 55);
     t.force.x += this.totalMass * ax;
     t.force.z += this.totalMass * az;
 
@@ -1362,7 +1406,7 @@ export class Character {
         const ph = this.walkPhase + off;
         const LH = rig.LEG_H;
         const sw = Math.sin(ph) * 0.34 * (0.6 + 0.4 * LH) * moveAmt;
-        const lift = Math.max(0, Math.cos(ph)) * 0.24 * (0.6 + 0.4 * LH) * moveAmt;
+        const lift = Math.pow(Math.max(0, Math.cos(ph)), 1.6) * 0.26 * (0.6 + 0.4 * LH) * moveAmt;
         tx = hipW.x + f.x * sw;
         ty = hipW.y + (FOOT.y - LIMB_TOP.y) * 0.97 + lift;
         tz = hipW.z + f.z * sw;
