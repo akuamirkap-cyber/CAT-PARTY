@@ -1548,7 +1548,12 @@ export class Character {
         // relaxed arms hanging a bit out (no T-pose); running = cute alternating pumps
         const ph = this.walkPhase + (s > 0 ? 0 : Math.PI);
         const run = clamp((hSpeed - 2.5) / 3, 0, 1);
-        const swing = -Math.sin(ph) * (0.2 + 0.22 * run) * moveAmt * (getShapeMode() === "asset" ? 0.8 : 1);
+        // The paw has to arc AROUND the belly: a target that merely slides
+        // forward beside the barrel gets eaten by it and the swing measures
+        // ~4 cm instead of ~14. Growing the side offset with the swing (and
+        // lifting the paw on the forward stroke) makes the arm pump readable
+        // at any speed while an idle cat keeps the relaxed menu hang.
+        const swing = -Math.sin(ph) * (0.32 + 0.24 * run) * moveAmt;
         const breathe = Math.sin(this.time * 2.4 + s) * 0.018;
         // The asset-shaped cat has a wide barrel, so a relaxed paw has to hang a
         // little further out (and less far forward) than the plush default,
@@ -1556,12 +1561,12 @@ export class Character {
         // Menu pose keeps the arms hanging right beside the belly, so the
         // asset shape uses the same tight spread here; pushOut() still lifts
         // a paw out of the body whenever the torso turns into it.
-        const out = (getShapeMode() === "asset" ? 0.018 : 0.17) + 0.03 * run;
-        const fwd = getShapeMode() === "asset" ? -0.01 : 0.05;
-        tx += side.x * s * out + f.x * (fwd + swing);
-        tz += side.z * s * out + f.z * (fwd + swing);
-        ty += -0.33 + breathe + run * (0.1 + Math.max(0, swing) * 0.55);
-        kp = 200 + run * 140;
+        const out = (getShapeMode() === "asset" ? 0.018 : 0.17) + 0.03 * run + Math.abs(swing) * 0.72;
+        const fwd = (getShapeMode() === "asset" ? -0.01 : 0.05) + swing;
+        tx += side.x * s * out + f.x * fwd;
+        tz += side.z * s * out + f.z * fwd;
+        ty += -0.33 + breathe + swing * 0.38 + run * (0.1 + Math.max(0, swing) * 0.55);
+        kp = 210 + run * 140 + moveAmt * 110;
       }
       // never aim a paw inside our own body / head (the PD would fight the self-collision)
       _sw.set(tx, ty, tz);
