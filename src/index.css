@@ -579,3 +579,39 @@ body,
 #boot-error button { border: 0; border-radius: 12px; padding: 8px 18px; background: linear-gradient(180deg,#ffe14d,#ffb000); color: #4a2c00; font-weight: 900; box-shadow: 0 3px 0 #b45309; cursor: pointer; }
 
 .ml-gl-note { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 5; max-width: 78vw; padding: 6px 14px; border-radius: 999px; background: rgba(59,42,26,.72); color: #ffeccc; font-family: "Nunito", system-ui, sans-serif; font-size: 11px; font-weight: 800; text-align: center; }
+
+/* ---------- bottom stock bar (reference: orange strip, ringed portraits, angled plates) ---------- */
+.stock-card { position: relative; display: flex; align-items: center; gap: 3px; padding: 2px 3px; transition: opacity .25s ease, filter .25s ease; }
+.stock-card.is-dead { opacity: .45; filter: grayscale(1); }
+.stock-card.is-you { background: rgba(255,255,255,.28); border-radius: 12px; box-shadow: 0 0 0 2px rgba(255,255,255,.55); }
+.stock-ring { position: relative; display: grid; place-items: center; width: 44px; height: 44px; overflow: hidden;
+  border: 3.5px solid #fff; border-radius: 999px; background: #eee; font-size: 22px; line-height: 1;
+  box-shadow: 0 2px 5px rgba(60,20,0,.45), inset 0 0 0 2px rgba(0,0,0,.35); flex: none; }
+.stock-ring .stock-ko { position: absolute; top: -4px; font-size: 13px; }
+.stock-ring .stock-flag { position: absolute; right: -5px; bottom: -5px; font-size: 12px; line-height: 1;
+  background: #fff; border-radius: 999px; padding: 1px 2px; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
+.stock-you-tag { position: absolute; top: -7px; left: 50%; transform: translateX(-50%); z-index: 2;
+  background: #ffb400; color: #4a2c00; font-size: 8px; font-weight: 900; letter-spacing: .08em;
+  padding: 0 5px; border-radius: 999px; border: 1.5px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); }
+.stock-p2-tag { background: #22b1e8; color: #04304a; }
+.stock-side { display: flex; flex-direction: column; gap: 2px; min-width: 34px; }
+.stock-plate { display: grid; place-items: center; height: 26px; border-radius: 5px;
+  border-top: 3px solid #fff;
+  background: linear-gradient(180deg, #4a5060 0%, #23262f 55%, #101218 100%);
+  transform: skewX(-10deg); box-shadow: 0 2px 0 rgba(0,0,0,.55); }
+.stock-num { transform: skewX(10deg); font-size: 15px; font-weight: 900; font-style: italic; color: #fff;
+  text-shadow: 0 2px 0 #000; letter-spacing: .02em; }
+.stock-dizzy { height: 5px; overflow: hidden; border-radius: 999px; background: rgba(20,22,28,.75);
+  transform: skewX(-10deg); border: 1px solid rgba(0,0,0,.5); }
+.stock-dizzy i { display: block; height: 100%; border-radius: 999px; transition: width .25s ease; }
+.stock-card.is-compact .stock-ring { width: 30px; height: 30px; border-width: 2.5px; font-size: 15px; }
+.stock-card.is-compact .stock-plate { height: 20px; }
+.stock-card.is-compact .stock-num { font-size: 11px; }
+.stock-card.is-compact .stock-side { min-width: 26px; }
+.stock-card.is-compact .stock-flag { font-size: 9px; right: -3px; bottom: -3px; }
+@media (max-width: 900px) {
+  .stock-card { padding: 2px 1px; gap: 2px; }
+  .stock-ring { width: 34px; height: 34px; font-size: 17px; }
+  .stock-side { min-width: 28px; }
+  .stock-num { font-size: 12px; }
+}

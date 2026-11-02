@@ -77,8 +77,6 @@ export default function GameView({ options, showTouch, onExit }: Props) {
     return () => window.removeEventListener("keydown", onKey);
   }, [hud?.phase, onExit]);
 
-  const me = hud?.players.find((p) => p.slot === 1);
-  const p2 = hud?.players.find((p) => p.slot === 2);
   const lowTime = hud && hud.phase === "playing" && hud.timeLeft <= 10;
 
   return (
@@ -188,86 +186,55 @@ export default function GameView({ options, showTouch, onExit }: Props) {
             </div>
           )}
 
-          {/* player status */}
-          <div className={`absolute left-3 flex flex-col gap-2 ${showTouch ? "top-16" : "bottom-3"}`}>
-            {[me, p2].filter(Boolean).map((p) => (
-              <div
-                key={p!.id}
-                className="flex items-center gap-2 rounded-2xl bg-white/90 p-2 pr-4 shadow-lg"
-                style={hud.teamMode && p!.team >= 0 ? { borderTop: `4px solid ${p!.team === 0 ? "#e8343c" : "#2f6fe0"}` } : undefined}
-              >
-                <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl text-2xl" style={{ background: p!.color }}>
-                  {p!.alive ? <Portrait id={p!.animal} fallback={p!.emoji} eyeStyle={p!.eyeStyle} expression={p!.expression} /> : "💀"}
-                </div>
-                <div className="w-36">
-                  <div className="flex justify-between text-xs font-black text-slate-700">
-                    <span>{p!.slot === 1 ? "KAMU" : "P2"}</span>
-                    <span>
-                      {hud.teamMode && <span className="mr-1 text-red-500">❤️ {Math.max(0, p!.lives)}</span>}
-                      🏆 {p!.wins}
-                    </span>
-                  </div>
-                  <div className="mt-1 h-3 overflow-hidden rounded-full bg-slate-200">
-                    <div
-                      className={`h-full rounded-full transition-all ${p!.ko ? "animate-pulse bg-purple-500" : p!.dizzy > 65 ? "bg-red-500" : "bg-amber-400"}`}
-                      style={{ width: `${p!.ko ? 100 : Math.min(100, p!.dizzy)}%` }}
-                    />
-                  </div>
-                  <div className="mt-0.5 text-[10px] font-bold text-slate-500">
-                    {!p!.alive ? "TERSINGKIR" : p!.ko ? "💫 PINGSAN! (dilempar = kalah)" : "Pusing"}
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* opponents strip / team lives bar (Digimon-style stock cards) */}
-          {!showTouch && (
-            <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-end gap-2">
-              {hud.teamMode
-                ? [0, 1].map((team) => (
-                    <div key={team} className={`flex flex-col gap-1 rounded-2xl p-1.5 ${team === 0 ? "bg-red-500/35 ring-2 ring-red-300/60" : "bg-sky-500/35 ring-2 ring-sky-300/60"}`}>
-                      <span className={`text-center text-[9px] font-black uppercase tracking-widest text-white/90`}>{team === 0 ? "🟥 MERAH" : "🟦 BIRU"}</span>
-                      <div className="flex gap-1.5">
-                        {hud.players
-                          .filter((p) => p.team === team)
-                          .sort((a, b) => a.slot - b.slot || a.id - b.id)
-                          .map((p) => (
-                            <div key={p.id} className={`relative flex flex-col items-center ${p.alive ? "" : "opacity-40 grayscale"} ${p.slot ? "rounded-xl ring-2 ring-yellow-300" : ""}`}>
-                              <span
-                                className={`absolute -left-1.5 -top-1.5 z-10 grid h-6 w-6 place-items-center rounded-lg border-2 border-white bg-slate-900 text-[13px] font-black shadow ${
-                                  p.alive || p.lives > 0 ? (p.lives <= 1 ? "animate-pulse text-red-400" : "text-green-400") : "text-slate-500"
-                                }`}
-                              >
-                                {p.lives > 0 ? p.lives : "✕"}
-                              </span>
-                              <div className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border-4 text-2xl shadow-md" style={{ background: p.color, borderColor: team === 0 ? "#e8343c" : "#2f6fe0" }}>
-                                {p.alive ? <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} /> : "💀"}
-                                {p.ko && <span className="absolute -top-2 text-sm">💫</span>}
-                              </div>
-                              <div className="mt-1 h-1.5 w-12 overflow-hidden rounded-full bg-white/60">
-                                <div className="h-full bg-red-500" style={{ width: `${p.ko ? 100 : Math.min(100, p.dizzy)}%` }} />
-                              </div>
-                            </div>
-                          ))}
-                      </div>
+          {/* stock bar — Digimon-style card strip for EVERY cat, in all modes */}
+          <div className="absolute inset-x-0 bottom-0">
+            <div
+              className="flex items-end justify-center gap-1 border-t-[3px] px-2 py-1.5"
+              style={{
+                background: "linear-gradient(180deg, #ffb347 0%, #ff9d2e 45%, #f07f1f 100%)",
+                borderTopColor: "#ffd9a0",
+                boxShadow: "0 -4px 14px rgba(180,80,0,.35)",
+              }}
+            >
+              {[...hud.players]
+                .sort((a, b) => (hud.teamMode ? a.team - b.team || a.slot - b.slot || a.id - b.id : a.slot - b.slot || a.id - b.id))
+                .map((p) => {
+                  const you = p.slot === 1;
+                  const mate = p.slot === 2;
+                  const ringColor = hud.teamMode ? (p.team === 0 ? "#e8343c" : "#2f6fe0") : you ? "#ffb400" : mate ? "#22b1e8" : "#f3f4f6";
+                  const dead = !p.alive && p.lives <= 0;
+                  const respawning = !p.alive && p.lives > 0;
+                  const num = hud.teamMode ? (p.lives > 0 ? p.lives : 0) : p.wins;
+                  return (
+                    <div key={p.id} className={`stock-card ${you ? "is-you" : ""} ${dead ? "is-dead" : ""} ${showTouch ? "is-compact" : ""}`}>
+                      {you && <span className="stock-you-tag">KAMU</span>}
+                      {mate && <span className="stock-you-tag stock-p2-tag">P2</span>}
+                      <span
+                        className="stock-ring"
+                        style={{ borderColor: ringColor, background: p.color }}
+                      >
+                        {p.alive ? <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} /> : "💀"}
+                        {p.ko && <span className="stock-ko">💫</span>}
+                        <span className="stock-flag">{flagEmoji(p.flag)}</span>
+                      </span>
+                      <span className="stock-side">
+                        <span className="stock-plate" style={{ borderTopColor: ringColor }}>
+                          <b className="stock-num">
+                            {respawning ? (you ? `↩${Math.ceil(hud.respawnIn ?? 1)}` : "↩") : dead ? "✕" : num}
+                          </b>
+                        </span>
+                        <span className="stock-dizzy">
+                          <i
+                            className={p.ko ? "bg-purple-500" : p.dizzy > 65 ? "bg-red-500" : "bg-sky-300"}
+                            style={{ width: `${p.ko ? 100 : Math.min(100, p.dizzy)}%` }}
+                          />
+                        </span>
+                      </span>
                     </div>
-                  ))
-                : hud.players
-                    .filter((p) => p.slot === 0)
-                    .map((p) => (
-                      <div key={p.id} className={`flex flex-col items-center ${p.alive ? "" : "opacity-40 grayscale"}`}>
-                        <div className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border-4 border-white text-2xl shadow-md" style={{ background: p.color }}>
-                          {p.alive ? <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} /> : "💀"}
-                          {p.ko && <span className="absolute -top-2 text-sm">💫</span>}
-                        </div>
-                        <div className="mt-1 h-1.5 w-12 overflow-hidden rounded-full bg-white/60">
-                          <div className="h-full bg-red-500" style={{ width: `${p.ko ? 100 : Math.min(100, p.dizzy)}%` }} />
-                        </div>
-                      </div>
-                    ))}
+                  );
+                })}
             </div>
-          )}
+          </div>
 
           {hud.phase === "playing" && hud.weaponContest && (
             <div className="absolute inset-x-0 top-24 flex justify-center px-4" role="status" aria-live="polite">
