@@ -208,7 +208,7 @@ export default function GameView({ options, showTouch, onExit }: Props) {
                           .filter((p) => p.team === team)
                           .sort((a, b) => a.slot - b.slot || a.id - b.id)
                           .map((p) => (
-                            <StockCard key={p.id} p={p} ring={team === 0 ? "#e8343c" : "#2f6fe0"} hud={hud} showTouch={showTouch} />
+                            <StockCard key={p.id} p={p} tone={team === 0 ? "red" : "blue"} hud={hud} showTouch={showTouch} />
                           ))}
                       </div>
                     </div>
@@ -222,7 +222,7 @@ export default function GameView({ options, showTouch, onExit }: Props) {
                             <StockCard
                               key={p.id}
                               p={p}
-                              ring={p.slot === 1 ? "#ffb400" : p.slot === 2 ? "#22b1e8" : "#f3f4f6"}
+                              tone={p.slot === 1 ? "gold" : p.slot === 2 ? "cyan" : "white"}
                               hud={hud}
                               showTouch={showTouch}
                             />
@@ -357,27 +357,28 @@ export default function GameView({ options, showTouch, onExit }: Props) {
   );
 }
 
-function StockCard({ p, ring, hud, showTouch }: { p: HudState["players"][number]; ring: string; hud: HudState; showTouch: boolean }) {
+function StockCard({ p, tone, hud, showTouch }: { p: HudState["players"][number]; tone: string; hud: HudState; showTouch: boolean }) {
   const you = p.slot === 1;
   const mate = p.slot === 2;
   const dead = !p.alive && p.lives <= 0;
   const respawning = !p.alive && p.lives > 0;
   const num = hud.teamMode ? (p.lives > 0 ? p.lives : 0) : p.wins;
   return (
-    <div className={`stock-card ${you ? "is-you" : ""} ${dead ? "is-dead" : ""} ${showTouch ? "is-compact" : ""}`}>
+    <div className={`stock-card tone-${tone} ${you ? "is-you" : ""} ${dead ? "is-dead" : ""} ${showTouch ? "is-compact" : ""}`}>
       {you && <span className="stock-you-tag">KAMU</span>}
       {mate && <span className="stock-you-tag stock-p2-tag">P2</span>}
-      <span className="stock-ring" style={{ borderColor: ring, background: p.color }}>
+      <span className="stock-ring" style={{ background: p.color }}>
         {p.alive ? <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} /> : "💀"}
         {p.ko && <span className="stock-ko">💫</span>}
         <span className="stock-flag">{flagEmoji(p.flag)}</span>
       </span>
       <span className="stock-side">
-        <span className="stock-plate" style={{ borderTopColor: ring }}>
+        <span className="stock-plate">
+          <i className="stock-bevel" />
           <b className="stock-num">{respawning ? (you ? `↩${Math.ceil(hud.respawnIn ?? 1)}` : "↩") : dead ? "✕" : num}</b>
         </span>
-        <span className="stock-dizzy">
-          <i className={p.ko ? "bg-purple-500" : p.dizzy > 65 ? "bg-red-500" : "bg-sky-300"} style={{ width: `${p.ko ? 100 : Math.min(100, p.dizzy)}%` }} />
+        <span className="stock-pill">
+          <i className={p.ko ? "is-ko" : p.dizzy > 65 ? "is-hot" : ""} style={{ width: `${p.ko ? 0 : Math.min(100, p.dizzy)}%` }} />
         </span>
       </span>
     </div>

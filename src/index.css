@@ -580,59 +580,91 @@ body,
 
 .ml-gl-note { position: absolute; left: 50%; top: 12px; transform: translateX(-50%); z-index: 5; max-width: 78vw; padding: 6px 14px; border-radius: 999px; background: rgba(59,42,26,.72); color: #ffeccc; font-family: "Nunito", system-ui, sans-serif; font-size: 11px; font-weight: 800; text-align: center; }
 
-/* ---------- bottom stock bar (dense reference strip + team panels) ---------- */
-.stock-strip { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 5px 8px 4px; }
-.stock-panel { position: relative; border-radius: 13px; padding: 4px 5px 3px;
-  border: 2px solid rgba(255,255,255,.55);
-  background:
-    repeating-linear-gradient(135deg, rgba(255,255,255,.05) 0 6px, rgba(0,0,0,.08) 6px 12px),
-    linear-gradient(180deg, rgba(30,32,40,.92), rgba(12,13,18,.94));
-  box-shadow: inset 0 2px 0 rgba(255,255,255,.22), 0 3px 8px rgba(60,20,0,.5); }
-.stock-panel::before { content: ""; position: absolute; inset: 0; border-radius: 11px; pointer-events: none;
-  border-top: 3px solid var(--team-line, #f3f4f6); }
-.stock-panel.is-red { --team-line: #ff5a63; border-color: #ff5a63; box-shadow: inset 0 2px 0 rgba(255,130,120,.4), 0 0 14px rgba(232,52,60,.35), 0 3px 8px rgba(60,20,0,.5); }
-.stock-panel.is-blue { --team-line: #55a4ff; border-color: #55a4ff; box-shadow: inset 0 2px 0 rgba(120,170,255,.4), 0 0 14px rgba(47,111,224,.4), 0 3px 8px rgba(60,20,0,.5); }
-.stock-panel.is-neutral { --team-line: #f3f4f6; }
-.stock-panel-tag { position: absolute; top: -8px; left: 8px; z-index: 3; font-size: 9px; font-weight: 900; letter-spacing: .1em;
-  color: #fff; padding: 0 6px; border-radius: 999px; border: 1.5px solid rgba(255,255,255,.75);
+/* ---------- bottom stock bar — reference-accurate glossy stock cards ---------- */
+.stock-strip { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 8px 12px 6px; position: relative; }
+.stock-strip::before { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(105deg, rgba(255,255,255,.075) 0 14px, rgba(255,255,255,0) 14px 42px, rgba(120,40,0,.06) 42px 58px, rgba(255,255,255,0) 58px 90px); }
+/* subtle glass panels so teams still read, without hiding the orange */
+.stock-panel { position: relative; border-radius: 12px; padding: 6px 6px 4px; border: 1.5px solid var(--panel-line, rgba(255,255,255,.5));
+  background: linear-gradient(180deg, rgba(24,26,34,.42), rgba(12,13,18,.5));
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.28), 0 2px 10px rgba(70,25,0,.35); }
+.stock-panel::after { content: ""; position: absolute; inset: 0; border-radius: 11px; pointer-events: none;
+  border-top: 3px solid var(--panel-line, #f3f4f6); }
+.stock-panel.is-red { --panel-line: #ff5a63; box-shadow: inset 0 1px 0 rgba(255,150,140,.5), 0 0 16px rgba(232,52,60,.45), 0 2px 10px rgba(70,25,0,.35); }
+.stock-panel.is-blue { --panel-line: #55a4ff; box-shadow: inset 0 1px 0 rgba(150,190,255,.5), 0 0 16px rgba(47,111,224,.5), 0 2px 10px rgba(70,25,0,.35); }
+.stock-panel.is-neutral { --panel-line: rgba(255,255,255,.55); }
+.stock-panel-tag { position: absolute; top: -8px; left: 10px; z-index: 3; font-size: 9px; font-weight: 900; letter-spacing: .1em;
+  color: #fff; padding: 0 6px; border-radius: 999px; border: 1.5px solid rgba(255,255,255,.8);
   text-shadow: 0 1px 0 rgba(0,0,0,.5); box-shadow: 0 1px 3px rgba(0,0,0,.45); }
 .stock-panel.is-red .stock-panel-tag { background: #e8343c; }
 .stock-panel.is-blue .stock-panel-tag { background: #2f6fe0; }
 .stock-row { display: flex; align-items: center; }
-.stock-card { position: relative; display: flex; align-items: center; gap: 2px; padding: 0; }
-.stock-card + .stock-card { margin-left: 3px; }
+
+/* tones drive ring + bevel colours */
+.stock-card.tone-red { --ring: #e8343c; --bev-a: #ff8a8a; --bev-b: #c00e1c; --bev-c: #7e040f; }
+.stock-card.tone-blue { --ring: #2f6fe0; --bev-a: #7fb0ff; --bev-b: #1553c4; --bev-c: #0c3585; }
+.stock-card.tone-gold { --ring: #ffb400; --bev-a: #ffd76e; --bev-b: #f59a00; --bev-c: #a86400; }
+.stock-card.tone-cyan { --ring: #22b1e8; --bev-a: #8fdcff; --bev-b: #0f93c9; --bev-c: #075f88; }
+.stock-card.tone-white { --ring: #f3f4f6; --bev-a: #ffffff; --bev-b: #c9ced9; --bev-c: #8b93a3; }
+
+.stock-card { position: relative; display: flex; align-items: center; gap: 0; }
+.stock-card + .stock-card { margin-left: 5px; }
 .stock-card.is-dead { opacity: .45; filter: grayscale(1); }
-.stock-card.is-you { background: rgba(255,255,255,.14); border-radius: 10px; box-shadow: 0 0 0 2px rgba(255,255,255,.45); padding: 1px 2px; }
-.stock-ring { position: relative; display: grid; place-items: center; width: 40px; height: 40px; overflow: hidden;
-  border: 4px solid #fff; border-radius: 999px; background: #eee; font-size: 20px; line-height: 1; flex: none;
-  box-shadow: 0 2px 4px rgba(50,15,0,.5), inset 0 0 0 2px rgba(0,0,0,.4); }
+.stock-card.is-you { background: linear-gradient(180deg, rgba(255,255,255,.2), rgba(255,255,255,.08)); border-radius: 11px; box-shadow: 0 0 0 2px rgba(255,255,255,.5); padding: 2px 3px; margin: -2px 2px -2px 2px; }
+
+/* portrait in a thick team ring with dark inner + outer contour, like the reference */
+.stock-ring { position: relative; display: grid; place-items: center; width: 42px; height: 42px; overflow: hidden;
+  border: 4.5px solid var(--ring, #fff); border-radius: 999px; background: #eee; font-size: 21px; line-height: 1; flex: none; z-index: 2;
+  box-shadow: 0 0 0 2px #17181d, inset 0 0 0 2px #17181d, 0 3px 6px rgba(50,15,0,.55); }
+.stock-ring > img { box-shadow: none; }
 .stock-ring .stock-ko { position: absolute; top: -4px; font-size: 12px; }
-.stock-ring .stock-flag { position: absolute; right: -4px; bottom: -4px; font-size: 11px; line-height: 1;
-  background: #fff; border-radius: 999px; padding: 1px 2px; box-shadow: 0 1px 2px rgba(0,0,0,.4); }
-.stock-you-tag { position: absolute; top: -7px; left: 50%; transform: translateX(-50%); z-index: 2;
+.stock-ring .stock-flag { position: absolute; right: -5px; bottom: -5px; font-size: 11px; line-height: 1;
+  background: #fff; border-radius: 999px; padding: 1px 2px; box-shadow: 0 0 0 1.5px #17181d, 0 1px 2px rgba(0,0,0,.4); }
+.stock-you-tag { position: absolute; top: -8px; left: 50%; transform: translateX(-50%); z-index: 3;
   background: #ffb400; color: #4a2c00; font-size: 8px; font-weight: 900; letter-spacing: .08em;
-  padding: 0 5px; border-radius: 999px; border: 1.5px solid #fff; box-shadow: 0 1px 3px rgba(0,0,0,.4); white-space: nowrap; }
+  padding: 0 5px; border-radius: 999px; border: 1.5px solid #fff; box-shadow: 0 0 0 1px #17181d, 0 1px 3px rgba(0,0,0,.4); white-space: nowrap; }
 .stock-p2-tag { background: #22b1e8; color: #04304a; }
-.stock-side { display: flex; flex-direction: column; gap: 2px; width: 40px; }
-.stock-plate { display: grid; place-items: center; height: 26px; border-radius: 4px;
-  border-top: 3px solid #fff;
-  background: linear-gradient(180deg, #4a5060 0%, #23262f 55%, #101218 100%);
-  transform: skewX(-10deg); box-shadow: 0 2px 0 rgba(0,0,0,.55); }
-.stock-num { transform: skewX(10deg); font-size: 15px; font-weight: 900; font-style: italic; color: #fff;
-  text-shadow: 0 2px 0 #000; letter-spacing: .02em; }
-.stock-dizzy { height: 5px; overflow: hidden; border-radius: 999px; background: rgba(20,22,28,.8);
-  transform: skewX(-10deg); border: 1px solid rgba(0,0,0,.5); }
-.stock-dizzy i { display: block; height: 100%; border-radius: 999px; transition: width .25s ease; }
-.stock-card.is-compact .stock-ring { width: 28px; height: 28px; border-width: 3px; font-size: 14px; }
-.stock-card.is-compact .stock-plate { height: 19px; }
-.stock-card.is-compact .stock-num { font-size: 11px; }
-.stock-card.is-compact .stock-side { width: 27px; }
+
+.stock-side { display: flex; flex-direction: column; gap: 3px; width: 56px; margin-left: -7px; }
+
+/* the big glossy plate: dark metal body, thick team bevel on top with a left tab, diagonal sheen */
+.stock-plate { position: relative; display: grid; place-items: center; height: 30px; border-radius: 4px 8px 8px 4px;
+  background: linear-gradient(180deg, #70768a 0%, #3f4450 34%, #191b21 58%, #2b2e37 100%);
+  transform: skewX(-9deg); overflow: hidden;
+  box-shadow: 0 0 0 1.5px #101116, 0 3px 0 rgba(0,0,0,.55), 0 5px 8px rgba(40,12,0,.4); }
+.stock-plate::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(112deg, rgba(255,255,255,.34) 0%, rgba(255,255,255,.1) 26%, rgba(255,255,255,0) 44%); }
+.stock-bevel { position: absolute; top: 0; left: 0; right: 0; height: 30%;
+  background: linear-gradient(180deg, var(--bev-a, #fff) 0%, var(--bev-b, #c9ced9) 55%, var(--bev-c, #8b93a3) 100%); }
+.stock-bevel::before { content: ""; position: absolute; left: 0; bottom: -4px; width: 11px; height: 4px;
+  background: var(--bev-c, #8b93a3); border-radius: 0 0 2px 0; }
+.stock-bevel::after { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 1.5px; background: rgba(255,255,255,.55); }
+.stock-num { position: relative; margin-top: 5px; font-size: 17px; font-weight: 900; font-style: italic; color: #fff;
+  text-shadow: 0 2px 0 #000, 0 0 6px rgba(0,0,0,.6); letter-spacing: .02em; transform: skewX(9deg); }
+
+/* the small cyan pill under the plate (dizzy meter drains it from the right) */
+.stock-pill { position: relative; display: block; height: 7px; margin-left: 8px; width: 42px; border-radius: 4px; overflow: hidden;
+  transform: skewX(-9deg); background: linear-gradient(180deg, #aeeeff 0%, #4ed1f7 45%, #1197cf 100%);
+  box-shadow: 0 0 0 1.5px #101116, inset 0 1px 0 rgba(255,255,255,.65), 0 2px 3px rgba(40,12,0,.35); }
+.stock-pill i { position: absolute; right: 0; top: 0; bottom: 0; background: rgba(12,14,20,.78); transition: width .25s ease; }
+.stock-pill i.is-hot { background: rgba(220,38,38,.85); }
+.stock-pill i.is-ko { background: linear-gradient(180deg, #a855f7, #6b21a8); animation: stockPulse 1s infinite; width: 100% !important; }
+@keyframes stockPulse { 0%, 100% { opacity: .55; } 50% { opacity: 1; } }
+
+.stock-card.is-compact .stock-ring { width: 30px; height: 30px; border-width: 3.5px; font-size: 14px; }
+.stock-card.is-compact .stock-side { width: 41px; }
+.stock-card.is-compact .stock-plate { height: 22px; }
+.stock-card.is-compact .stock-num { font-size: 12px; margin-top: 4px; }
+.stock-card.is-compact .stock-pill { height: 5px; width: 31px; margin-left: 6px; }
 .stock-card.is-compact .stock-flag { font-size: 9px; right: -3px; bottom: -3px; }
+
 @media (max-width: 900px) {
-  .stock-strip { gap: 5px; padding: 4px 5px 3px; }
-  .stock-ring { width: 32px; height: 32px; border-width: 3px; font-size: 15px; }
-  .stock-side { width: 31px; }
-  .stock-num { font-size: 12px; }
-  .stock-card + .stock-card { margin-left: 2px; }
+  .stock-strip { gap: 6px; padding: 5px 6px 4px; }
+  .stock-ring { width: 33px; height: 33px; border-width: 3.5px; font-size: 15px; }
+  .stock-side { width: 43px; }
+  .stock-plate { height: 23px; }
+  .stock-num { font-size: 12px; margin-top: 4px; }
+  .stock-pill { height: 5px; width: 32px; }
+  .stock-card + .stock-card { margin-left: 3px; }
   .stock-panel-tag { font-size: 8px; top: -7px; }
 }
