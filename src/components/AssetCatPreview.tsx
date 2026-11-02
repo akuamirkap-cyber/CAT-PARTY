@@ -115,7 +115,7 @@ function makeAssetCat(build: CatBuild, maxAniso: number) {
 }
 
 interface Props {
-  /** Game cat id; the asset only ships Oyen and Siam, everything else shows Oyen. */
+  /** Game cat id; the asset only ships Oyen and Siam, other picks hide the showcase. */
   animal: string;
   active: boolean;
 }
@@ -125,7 +125,11 @@ interface Props {
  * Built from an SDF in a worker, so it never stalls the menu.
  */
 export default function AssetCatPreview({ animal, active }: Props) {
-  const assetId: AssetId = animal === "siam" ? "siam" : "oyen";
+  // only dress this showcase for the two cats the exported asset actually has;
+  // for every other pick (e.g. Jambul) it hides so it can't masquerade as the
+  // selected character
+  const supported = animal === "siam" || animal === "oyen";
+  const assetId: AssetId = supported ? (animal as AssetId) : "oyen";
   const [status, setStatus] = useState<"loading" | "ready" | "failed">("loading");
   const [progress, setProgress] = useState(0);
   const host = useRef<HTMLDivElement>(null);
@@ -310,6 +314,7 @@ export default function AssetCatPreview({ animal, active }: Props) {
     };
   }, []);
 
+  if (!supported) return null; // the pick is not Oyen/Siam: step aside, the lineup preview shows it
   return (
     <div className="mm-asset-box" data-testid="menu-asset-cat">
       <div ref={host} className="mm-asset-stage" aria-hidden="true" />
