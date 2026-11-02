@@ -971,7 +971,7 @@ interface Recipe {
   paints: Paint[];
   faceStrokes: FaceStroke[];
   /** puppy = big black eye + colour crescent + sparkle, big = huge iris + big pupil, pill = black capsule */
-  eye: "puppy" | "big" | "pill";
+  eye: "puppy" | "big" | "pill" | "plush";
   iris: number;
   px: number; // pupil offset (-1..1, + = viewer's right)
   py: number;
@@ -1014,40 +1014,54 @@ function recipeFor(id: AnimalId): Recipe {
         w0: 0.04, w1: 0.032, col: 0x9c4f16,
       });
       c.blush(0xe8603c);
-      // vest wrapping the torso + cream collar at the neck
-      c.paint(ell("torso", [0, ty(0.12), 0], [0.42, ty(0.2), 0.4]), 0x2f8f86, 0.012, 1, PI.torso);
-      c.paint(ell("torso", [0, ty(0.3), 0.02], [0.3, ty(0.055), 0.29]), 0xf3ead9, 0.01, 1, PI.torso);
-      // dark sash with a gold buckle on the chest
-      c.paint(ell("torso", [0, ty(-0.06), 0], [0.43, ty(0.05), 0.41]), 0x2b3a3c, 0.01, 1, PI.torso);
-      c.paint(ell("torso", [0, ty(-0.06), 0.4], [0.075, 0.075, 0.09]), 0xf2c14e, 0.008, 1, PI.torso);
-      // teal shorts over the hips
-      c.paint(ell("torso", [0, ty(-0.27), 0], [0.42, ty(0.13), 0.4]), 0x2f8f86, 0.012, 1, PI.torso);
+      // ── outfit, matched to the reference plush ──
+      // cream shirt peeking at the collar and below the vest
+      c.paint(ell("torso", [0, ty(0.33), 0.02], [0.3, ty(0.05), 0.29]), 0xf3ead9, 0.01, 1, PI.torso);
+      // big teal vest: shoulders down to mid-torso, longer in front
+      c.paint(ell("torso", [0, ty(0.14), 0.03], [0.43, ty(0.21), 0.41]), 0x2f8f86, 0.012, 1, PI.torso);
+      // vest trim: pale stripes like the woven band on the reference
+      c.paint(ell("torso", [0, ty(0.05), 0.38], [0.36, ty(0.035), 0.1]), 0xd8c9a3, 0.009, 1, PI.torso);
+      // thick dark sash across the lower chest with round studs
+      c.paint(ell("torso", [0, ty(-0.05), 0], [0.44, ty(0.06), 0.42]), 0x2b3a3c, 0.01, 1, PI.torso);
+      c.paint(ell("torso", [-0.16, ty(-0.05), 0.4], [0.032, 0.028, 0.05]), 0xd8c9a3, 0.006, 1, PI.torso);
+      c.paint(ell("torso", [0.02, ty(-0.05), 0.42], [0.032, 0.028, 0.05]), 0xd8c9a3, 0.006, 1, PI.torso);
+      // gold buckle front and centre, big enough to read
+      c.paint(ell("torso", [0.14, ty(-0.05), 0.4], [0.09, 0.095, 0.08]), 0xf2c14e, 0.007, 1, PI.torso);
+      c.paint(ell("torso", [0.14, ty(-0.05), 0.45], [0.046, 0.05, 0.05]), 0xc98f1d, 0.006, 1, PI.torso);
+      // teal shorts over the hips, with the orange belly showing in between
+      c.paint(ell("torso", [0, ty(-0.3), 0], [0.43, ty(0.15), 0.41]), 0x2f8f86, 0.012, 1, PI.torso);
+      // teal short sleeves on the upper arms
+      const jsy = 0.2 * (0.7 * TU.armRoot + 0.3 * TU.armTip) * ASSET_LIMB.armR * ASSET_LIMB.pawR;
+      for (const a of ["armL", "armR"] as const)
+        c.paint(ell("torso", B(a, [ARM_BOW() * 0.7, rig.LIMB_TOP[1] - 0.06, 0.0]), [jsy * 1.75, 0.085, jsy * 1.75]), 0x2f8f86, 0.01);
       // cream hand mitts (arms only — the legs wear boots)
       const jat = TU.armTip;
       for (const a of ["armL", "armR"] as const)
         c.paint(ell("torso", B(a, [0, PAW() - 0.025 * jat, 0.0]), [0.17 * jat, 0.13 * jat, 0.17 * jat]), 0xf3ead9, 0.008);
-      // striped socks + brown boots on the legs
+      // brown boots reaching up the shin, striped cuff on top
       for (const l of ["legL", "legR"] as const) {
         if (isSculptedShape()) {
           const fy = footCenterY(), frr = footRY(), fo = FOOT_OUT(), ff = FOOT_FWD();
+          // foot + shaft up the shin
           c.paint(ell("torso", B(l, [fo, fy + 0.01, ff + 0.02]), [0.156 * ASSET_LIMB.footW * 1.2, frr * 1.3, 0.212 * ASSET_LIMB.footD * 1.14]), 0x5f3a1e, 0.008);
-          c.paint(ell("torso", B(l, [fo, fy + frr * 1.3, ff * 0.5]), [0.135, 0.085, 0.135]), 0x5f3a1e, 0.01);
-          const ring = (y: number, col: number) => c.paint(ell("torso", B(l, [0.03, y, 0.0]), [0.128, 0.05, 0.128]), col, 0.009);
-          ring(fy + frr * 1.3 + 0.19, 0xf3ead9);
-          ring(fy + frr * 1.3 + 0.3, 0xe07a2f);
-          ring(fy + frr * 1.3 + 0.41, 0xf3ead9);
+          c.paint(ell("torso", B(l, [fo, fy + frr * 1.45, ff * 0.35]), [0.14, 0.24, 0.14]), 0x5f3a1e, 0.01);
+          const ring = (y: number, col: number) => c.paint(ell("torso", B(l, [0.02, y, 0.0]), [0.132, 0.055, 0.132]), col, 0.009);
+          ring(fy + frr * 1.45 + 0.26, 0xf3ead9);
+          ring(fy + frr * 1.45 + 0.4, 0xe07a2f);
+          ring(fy + frr * 1.45 + 0.54, 0xf3ead9);
         } else {
           c.paint(ell("torso", B(l, [0, LY(-0.25) - figureFootOffset(), 0.07]), [0.22, 0.13, 0.26]), 0x5f3a1e, 0.008);
-          const ring2 = (y: number, col: number) => c.paint(ell("torso", B(l, [0, y - figureFootOffset(), 0.05]), [0.19, 0.045, 0.19]), col, 0.009);
-          ring2(LY(-0.17), 0xf3ead9);
-          ring2(LY(-0.13), 0xe07a2f);
-          ring2(LY(-0.09), 0xf3ead9);
+          c.paint(ell("torso", B(l, [0, LY(-0.2) - figureFootOffset(), 0.03]), [0.2, 0.12, 0.2]), 0x5f3a1e, 0.01);
+          const ring2 = (y: number, col: number) => c.paint(ell("torso", B(l, [0, y - figureFootOffset(), 0.05]), [0.2, 0.05, 0.2]), col, 0.009);
+          ring2(LY(-0.15), 0xf3ead9);
+          ring2(LY(-0.11), 0xe07a2f);
+          ring2(LY(-0.07), 0xf3ead9);
         }
       }
       // tiny closed smile (no cat omega mouth, no tongue) like the plush
       c.faceStrokes.push({ x: 0, y: -0.34, pts: [[-0.075, 0.05], [-0.035, 0.005], [0.035, 0.005], [0.075, 0.05]], w0: 0.028, w1: 0.024, col: 0x5a2c14 });
       return done(c, {
-        eye: "puppy", iris: 0x35304a, nose: 0xc9671f, line: 0x5a2c14, noMouth: true, whisker: 0xe07a2f,
+        eye: "plush", iris: 0, nose: 0xc9671f, line: 0x5a2c14, noMouth: true, whisker: 0xe07a2f,
       }, 0xe8834a, true);
     }
     case "oyen": {
@@ -2077,6 +2091,16 @@ function buildEye(rec: Recipe, side: 1 | -1, hs: Shape[], eyesNormal: THREE.Grou
     addTo(pg, pupilDecal(pg, fr, polyTris(stadium(w, h)), DARK, 1, 0.25));
     addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(w * 0.32, h * 0.32, 0.018 * z, 0.018 * z, 12)), 0xffffff, 2, 0.2));
     koSize = 0.08 * z;
+  } else if (rec.eye === "plush") {
+    // the round plush buddy: enormous glossy black discs with a big soft
+    // catchlight upper-out and a tiny echo lower-in (stitched-toy eyes)
+    const R = 0.205 * z;
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, R + 0.014 * z, R * 1.02 + 0.014 * z, 48)), 0x2b2733, 0, 0.3));
+    addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, R, R * 1.02, 48)), 0x0c0a10, 1, 0.2));
+    const pg = pupilGroup(eyeContent, fr, 0, 0);
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(side * R * 0.34, R * 0.42, R * 0.30, R * 0.34, 22)), 0xffffff, 2, 0.15));
+    addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(side * R * 0.12, -R * 0.42, R * 0.10, R * 0.11, 14)), 0xffffff, 3, 0.15));
+    koSize = 0.13 * z;
   } else if (rec.eye === "puppy") {
     // reference 3: big black round eye, thick green crescent at the bottom, white dot near the top
     const R = 0.165 * z;
