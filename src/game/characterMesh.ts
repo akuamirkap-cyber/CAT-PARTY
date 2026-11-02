@@ -1001,6 +1001,55 @@ function recipeFor(id: AnimalId): Recipe {
     return { px: 0, py: 0, cross: 0, lid: 0, tilt: 0, ...r, shapes: c.shapes, arms: c.arms, paints: c.paints, faceStrokes: c.faceStrokes };
   };
   switch (id) {
+    case "jambul": {
+      // the round orange plush buddy: no ears, a stitched curl on top, huge
+      // glossy black eyes with a glint, blush and a tiny smile — dressed in a
+      // teal vest with a cream collar, a dark sash with a gold buckle, teal
+      // shorts, striped socks, brown boots and cream hand mitts
+      const c = new Cat(0xe07a2f);
+      // stitched curl on top of the head
+      c.faceStrokes.push({
+        x: 0, y: 0.4,
+        pts: [[0.03, 0.0], [0.07, 0.05], [0.04, 0.11], [-0.03, 0.12], [-0.06, 0.06], [-0.02, 0.0]],
+        w0: 0.04, w1: 0.032, col: 0x9c4f16,
+      });
+      c.blush(0xe8603c);
+      // vest wrapping the torso + cream collar at the neck
+      c.paint(ell("torso", [0, ty(0.12), 0], [0.42, ty(0.2), 0.4]), 0x2f8f86, 0.012, 1, PI.torso);
+      c.paint(ell("torso", [0, ty(0.3), 0.02], [0.3, ty(0.055), 0.29]), 0xf3ead9, 0.01, 1, PI.torso);
+      // dark sash with a gold buckle on the chest
+      c.paint(ell("torso", [0, ty(-0.06), 0], [0.43, ty(0.05), 0.41]), 0x2b3a3c, 0.01, 1, PI.torso);
+      c.paint(ell("torso", [0, ty(-0.06), 0.4], [0.075, 0.075, 0.09]), 0xf2c14e, 0.008, 1, PI.torso);
+      // teal shorts over the hips
+      c.paint(ell("torso", [0, ty(-0.27), 0], [0.42, ty(0.13), 0.4]), 0x2f8f86, 0.012, 1, PI.torso);
+      // cream hand mitts (arms only — the legs wear boots)
+      const jat = TU.armTip;
+      for (const a of ["armL", "armR"] as const)
+        c.paint(ell("torso", B(a, [0, PAW() - 0.025 * jat, 0.0]), [0.17 * jat, 0.13 * jat, 0.17 * jat]), 0xf3ead9, 0.008);
+      // striped socks + brown boots on the legs
+      for (const l of ["legL", "legR"] as const) {
+        if (isSculptedShape()) {
+          const fy = footCenterY(), frr = footRY(), fo = FOOT_OUT(), ff = FOOT_FWD();
+          c.paint(ell("torso", B(l, [fo, fy + 0.01, ff + 0.02]), [0.156 * ASSET_LIMB.footW * 1.2, frr * 1.3, 0.212 * ASSET_LIMB.footD * 1.14]), 0x5f3a1e, 0.008);
+          c.paint(ell("torso", B(l, [fo, fy + frr * 1.3, ff * 0.5]), [0.135, 0.085, 0.135]), 0x5f3a1e, 0.01);
+          const ring = (y: number, col: number) => c.paint(ell("torso", B(l, [0.03, y, 0.0]), [0.128, 0.05, 0.128]), col, 0.009);
+          ring(fy + frr * 1.3 + 0.19, 0xf3ead9);
+          ring(fy + frr * 1.3 + 0.3, 0xe07a2f);
+          ring(fy + frr * 1.3 + 0.41, 0xf3ead9);
+        } else {
+          c.paint(ell("torso", B(l, [0, LY(-0.25) - figureFootOffset(), 0.07]), [0.22, 0.13, 0.26]), 0x5f3a1e, 0.008);
+          const ring2 = (y: number, col: number) => c.paint(ell("torso", B(l, [0, y - figureFootOffset(), 0.05]), [0.19, 0.045, 0.19]), col, 0.009);
+          ring2(LY(-0.17), 0xf3ead9);
+          ring2(LY(-0.13), 0xe07a2f);
+          ring2(LY(-0.09), 0xf3ead9);
+        }
+      }
+      // tiny closed smile (no cat omega mouth, no tongue) like the plush
+      c.faceStrokes.push({ x: 0, y: -0.34, pts: [[-0.075, 0.05], [-0.035, 0.005], [0.035, 0.005], [0.075, 0.05]], w0: 0.028, w1: 0.024, col: 0x5a2c14 });
+      return done(c, {
+        eye: "puppy", iris: 0x35304a, nose: 0xc9671f, line: 0x5a2c14, noMouth: true, whisker: 0xe07a2f,
+      }, 0xe8834a, true);
+    }
     case "oyen": {
       // the crayon cat: orange tabby, white muzzle/belly/paws, huge green eyes
       // palette lifted straight from the exported 3D cat (deeper orange)
@@ -3502,10 +3551,11 @@ export function warmCharacter(def: AnimalDef) {
 export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "none", eyeStyle: EyeStyleId = "default", expression: ExpressionId = "default"): CharacterVisual {
   const isCap = accessory.startsWith("cap");
   // the fullface helmet and the hockey mask bake the ears away; the loose
-  // geometry comes back when the mask is knocked off
-  const earsHidden = accessory === "helmet" || accessory === "jason" || isCap;
+  // geometry comes back when the mask is knocked off. Jambul the plush simply
+  // has no ears at all, so they never come back.
+  const earsHidden = accessory === "helmet" || accessory === "jason" || isCap || def.id === "jambul";
   const asset = getAsset(def, earsHidden);
-  const uncoveredGeometry = earsHidden ? getAsset(def).geometry : null;
+  const uncoveredGeometry = earsHidden && def.id !== "jambul" ? getAsset(def).geometry : null;
   const bones = PARTS.map((name, i) => {
     const b = new THREE.Bone();
     b.name = name;
@@ -3552,8 +3602,8 @@ export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "n
     if (acc.armRGroup) bones[3].add(acc.armRGroup);
     if (acc.legLGroup) bones[4].add(acc.legLGroup);
     if (acc.legRGroup) bones[5].add(acc.legRGroup);
-    if (accessory === "helmet" || accessory === "jason") bones[1].traverse((o) => o.name === "whisker" && (o.visible = false));
   }
+  if (accessory === "helmet" || accessory === "jason" || def.id === "jambul") bones[1].traverse((o) => o.name === "whisker" && (o.visible = false));
 
   return {
     torso: bones[0],

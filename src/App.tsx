@@ -43,7 +43,10 @@ export default function App() {
     localStorage.setItem("mb.camMode", camMode);
     localStorage.setItem("mb.camZoom", String(camZoom));
   }, [camMode, camZoom]);
-  const isTouchDevice = useMemo(() => typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0), []);
+  const isTouchDevice = useMemo(() =>
+    typeof window !== "undefined" &&
+    ("ontouchstart" in window || navigator.maxTouchPoints > 0 || window.matchMedia?.("(pointer: coarse)")?.matches === true),
+  []);
   const [showTouch, setShowTouch] = useState(isTouchDevice);
   // Page sweep: on by default (it is part of the menu look), calm fade optional.
   const [wipeMode, setWipeMode] = useState<"full" | "calm">(() => (localStorage.getItem("mb.wipeMode") === "calm" ? "calm" : "full"));

@@ -9,7 +9,8 @@ export type AnimalId =
   | "garong"
   | "mendung"
   | "oreo"
-  | "moka";
+  | "moka"
+  | "jambul";
 
 export interface AnimalDef {
   id: AnimalId;
@@ -32,6 +33,7 @@ export const ANIMALS: AnimalDef[] = [
   { id: "mendung", name: "Mendung", emoji: "🐈‍⬛", tagline: "Kalem tapi bahaya 😶", ui: "#d9cfc6" },
   { id: "oreo", name: "Oreo", emoji: "🐈‍⬛", tagline: "Imut maksimal 🥺", ui: "#f4b8cc" },
   { id: "moka", name: "Moka", emoji: "🐱", tagline: "Gemoy pemalu 🌸", ui: "#f7c6d4" },
+  { id: "jambul", name: "Jambul", emoji: "🧸", tagline: "Bulu piatu berjongkok 🧡", ui: "#2a8f86" },
 ];
 
 export const animalById = (id: AnimalId) => ANIMALS.find((a) => a.id === id) ?? ANIMALS[0];

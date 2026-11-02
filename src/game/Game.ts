@@ -136,15 +136,22 @@ export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "
   const flags = pickFlags(32).filter((f) => f !== "id"); // Indonesia is yours
   let flagIdx = 0;
   const nextFlag = () => flags[flagIdx++ % flags.length];
+  // Jambul is a costume character: its face IS the plush look, so only an
+  // explicit wardrobe pick may override it (random faces stay the recipe face).
+  const plushFace = { eyeStyle: "default" as EyeStyleId, expression: "default" as ExpressionId };
   const youFace = isDefaultFace(opts.p1Eyes ?? "default", opts.p1Expression ?? "default") ? randomFace() : { eyeStyle: opts.p1Eyes!, expression: opts.p1Expression! };
+  const youDef = animalById(opts.p1Animal);
+  const youFinal = youDef.id === "jambul" && isDefaultFace(opts.p1Eyes ?? "default", opts.p1Expression ?? "default") ? plushFace : youFace;
   const roster: RosterEntry[] = [{
-    def: animalById(opts.p1Animal), name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc,
-    eyeStyle: youFace.eyeStyle, expression: youFace.expression, team: teams ? pickTeam() : -1,
+    def: youDef, name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc,
+    eyeStyle: youFinal.eyeStyle, expression: youFinal.expression, team: teams ? pickTeam() : -1,
     flag: "id", // kamu selalu tampil dengan bendera Indonesia
   }];
   if (opts.twoPlayer) {
     const p2Face = randomFace();
-    roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: p2Face.eyeStyle, expression: p2Face.expression, team: teams ? 1 : -1, flag: nextFlag() });
+    const p2Def = animalById(opts.p2Animal);
+    const p2Final = p2Def.id === "jambul" ? plushFace : p2Face;
+    roster.push({ def: p2Def, name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: p2Final.eyeStyle, expression: p2Final.expression, team: teams ? 1 : -1, flag: nextFlag() });
     if (teams) counts[1]++;
   }
   const used = new Set<AnimalId>(roster.map(r => r.def.id));
@@ -155,7 +162,7 @@ export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "
     const def = pool[Math.floor(Math.random() * pool.length)];
     used.add(def.id);
     const acc: AccessoryId = Math.random() < 0.7 ? ACCESSORIES[1 + Math.floor(Math.random() * (ACCESSORIES.length - 1))].id : "none";
-    const face = randomFace();
+    const face = def.id === "jambul" ? plushFace : randomFace();
     roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: face.eyeStyle, expression: face.expression, team: teams ? pickTeam() : -1, flag: nextFlag() });
   }
   return roster;
