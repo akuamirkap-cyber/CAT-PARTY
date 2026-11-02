@@ -3,8 +3,10 @@ import { flagEmoji } from "../game/flags";
 import { Game, createRoster, type GameOptions, type HudState } from "../game/Game";
 import TouchControls from "./TouchControls";
 import { initAudio } from "../game/audio";
+import { renderPortraitFallback } from "../game/portraitFallback";
 import Portrait from "./Portrait";
-import { preloadCharacters, type PreloadJob } from "../game/characterPreload";
+import { buildPreloadJobs, preloadCharacters } from "../game/characterPreload";
+import { storeWorkerPortrait } from "../game/portraits";
 
 interface Props {
   options: Omit<GameOptions, "onHud">;
@@ -25,20 +27,21 @@ export default function GameView({ options, showTouch, onExit }: Props) {
   useEffect(() => {
     const controller = new AbortController();
     const roster = createRoster(options);
-    const jobs: PreloadJob[] = [];
-    const seen = new Set<string>();
-    for (const r of roster) {
-      const covered = r.acc === "helmet" || r.acc.startsWith("cap");
-      for (const noEars of covered && r.acc.startsWith("cap") ? [true, false] : [covered]) {
-        const key = `${r.def.id}:${noEars}`;
-        if (!seen.has(key)) { seen.add(key); jobs.push({ id: r.def.id, noEars }); }
-      }
-    }
+    // Faces for the stock bar are part of the job: without `portrait` the HUD
+    // rings would fall back to animal emoji for the whole match.
+    const jobs = buildPreloadJobs(roster);
     let g: Game | null = null;
     let t = 0;
     // If workers are unsupported, keep the game functional with its existing
     // synchronous builder rather than leaving the player on a loading screen.
-    void preloadCharacters(jobs, { signal: controller.signal, onProgress: (done, total) => setLoading({ done, total }) })
+    void preloadCharacters(jobs, {
+      signal: controller.signal,
+      onProgress: (done, total) => setLoading({ done, total }),
+      onPortrait: (result) => {
+        if (result.portrait) storeWorkerPortrait(result);
+        else renderPortraitFallback(result);
+      },
+    })
       .catch(() => {})
       .then(() => {
         if (controller.signal.aborted || !mountRef.current) return;

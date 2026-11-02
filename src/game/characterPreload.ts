@@ -1,9 +1,44 @@
-import { animalById } from './animals';
+import { animalById, type AccessoryId } from './animals';
+import type { EyeStyleId, ExpressionId } from './eyes';
 import { hasCharacterAsset, installCharacterAsset } from './characterMesh';
 import { getShapeMode, getTuning, tuningKey } from './tuning';
+import { hasPortrait } from './portraits';
 import type { CharacterJob, CharacterResult } from './characterWorker';
 
 export type PreloadJob = Pick<CharacterJob, 'id' | 'noEars' | 'portrait'>;
+
+export interface PreloadRosterEntry {
+  def: { id: CharacterJob['id'] };
+  acc: AccessoryId;
+  eyeStyle: EyeStyleId;
+  expression: ExpressionId;
+}
+
+/**
+ * Mesh jobs for the whole roster, plus a face portrait for every cat whose
+ * portrait is not cached yet — the in-game HUD shows these faces in its stock
+ * bar, so a match must never run with emoji fallbacks in the rings.
+ */
+export function buildPreloadJobs(roster: PreloadRosterEntry[]): PreloadJob[] {
+  const jobs: PreloadJob[] = [];
+  const seen = new Set<string>();
+  const portraitDone = new Set<string>();
+  for (const r of roster) {
+    const covered = r.acc === 'helmet' || r.acc.startsWith('cap');
+    for (const noEars of covered && r.acc.startsWith('cap') ? [true, false] : [covered]) {
+      const key = `${r.def.id}:${noEars}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const pKey = `${r.def.id}:${r.eyeStyle}:${r.expression}`;
+      const portrait = portraitDone.has(pKey) || hasPortrait(r.def.id, r.eyeStyle, r.expression)
+        ? undefined
+        : { eyeStyle: r.eyeStyle, expression: r.expression };
+      if (portrait) portraitDone.add(pKey);
+      jobs.push({ id: r.def.id, noEars, portrait });
+    }
+  }
+  return jobs;
+}
 
 /** Run expensive SDF mesh creation outside the UI thread, one job at a time. */
 export function preloadCharacters(jobs: PreloadJob[], options: {
