@@ -2959,19 +2959,24 @@ function makeAfro(hs: Shape[]): AccessoryBuild {
   const rainbow = [0xe94f4f, 0xf2994a, 0xf2d94a, 0x6fcf6f, 0x56a8f5, 0xa45de8];
   let seed = 7;
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
-  const puff = (dir: THREE.Vector3) => {
+  const puff = (dir: THREE.Vector3, scale = 1) => {
     const dn = dir.clone().normalize();
     const hit = march(body, Cb.clone().addScaledVector(dn, 1.8), dn.clone().negate());
-    const r = (0.115 + rnd() * 0.06) * HS;
+    const r = (0.17 + rnd() * 0.07) * HS * scale;
     const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), accMat(rainbow[Math.floor(rnd() * rainbow.length)], 0.9, { clearcoat: 0 }));
-    ball.position.copy(toLocal(hit.p.clone().addScaledVector(hit.n, r * 0.5)));
+    ball.position.copy(toLocal(hit.p.clone().addScaledVector(hit.n, r * 0.42)));
     g.add(ball);
   };
-  for (let i = 0; i < 14; i++) {
-    const a = (i / 14) * Math.PI * 2 + rnd() * 0.3;
-    puff(new THREE.Vector3(Math.sin(a), 0.65 + rnd() * 0.55, Math.cos(a)));
+  // two rings around the crown plus a full top, so the do reads big and round
+  for (let i = 0; i < 10; i++) {
+    const a = (i / 10) * Math.PI * 2 + rnd() * 0.22;
+    puff(new THREE.Vector3(Math.sin(a), 0.42, Math.cos(a)), 1.08);
   }
-  for (let i = 0; i < 3; i++) puff(new THREE.Vector3((rnd() - 0.5) * 0.8, 1.6, (rnd() - 0.5) * 0.8));
+  for (let i = 0; i < 8; i++) {
+    const a = (i / 8) * Math.PI * 2 + 0.3 + rnd() * 0.25;
+    puff(new THREE.Vector3(Math.sin(a) * 0.45, 1, Math.cos(a) * 0.45), 1.14);
+  }
+  for (let i = 0; i < 4; i++) puff(new THREE.Vector3((rnd() - 0.5) * 0.7, 1.5, (rnd() - 0.5) * 0.7), 1.2);
   return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
 }
 
@@ -3036,12 +3041,12 @@ function makeJason(hs: Shape[]): AccessoryBuild {
   const M = toLocal(Mb); // head-bone local (positioning)
   const shellM = accMat(0xf2efe6, 0.45, { clearcoat: 0.35, side: THREE.DoubleSide });
   const holeM = accMat(0x1a1a1e, 0.6);
-  // snug dome over the skull: slightly proud of the cheeks so the face reads through the holes
-  const Rm = 0.6 * HS;
+  // dome floats just proud of the cheeks so it never sinks into the head
+  const Rm = 0.68 * HS;
   const shell = new THREE.Mesh(new THREE.SphereGeometry(Rm, 26, 18, 0, Math.PI * 2, 0, Math.PI * 0.62), shellM);
   shell.rotation.x = 0.38; // rim dips to the chin in front, clears the muzzle
   shell.scale.set(1, 1.04, 0.94);
-  shell.position.copy(M);
+  shell.position.copy(M).add(new THREE.Vector3(0, 0.02 * HS, 0.06 * HS));
   g.add(shell);
   /** dark detail lying flat on the shell surface in the given direction from the skull centre */
   const onShell = (dir: THREE.Vector3) => {
@@ -3077,22 +3082,22 @@ function makeJason(hs: Shape[]): AccessoryBuild {
 /** Sabuk juara dari Ball Party. */
 function makeBelt(ts: Shape[]): AccessoryBuild {
   const { mn, mx } = blobBounds(blobsOnly(ts));
-  const y0 = mn.y + 0.34 * (mx.y - mn.y);
-  const ring = torsoRing(ts, y0, 0.045);
+  const y0 = mn.y + 0.45 * (mx.y - mn.y);
+  const ring = torsoRing(ts, y0, 0.05);
   const g = new THREE.Group();
   const leather = accMat(0x3a2416, 0.8, { clearcoat: 0 });
   const gold = accMat(0xf5c542, 0.25, { clearcoat: 0.8, metalness: 0.5 });
   const curve = new THREE.CatmullRomCurve3(ring, true);
-  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 96, 0.055, 10, true), leather));
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 96, 0.075, 10, true), leather));
   let front = ring[0];
   for (const p of ring) if (p.z > front.z) front = p;
   const out = new THREE.Vector3(front.x, 0, front.z + 1).normalize();
-  const buckle = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 0.05, 6), gold);
+  const buckle = new THREE.Mesh(new THREE.CylinderGeometry(0.19, 0.21, 0.07, 6), gold);
   buckle.rotation.x = Math.PI / 2;
-  buckle.position.copy(front).addScaledVector(out, 0.05);
+  buckle.position.copy(front).addScaledVector(out, 0.06);
   g.add(buckle);
-  const pin = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), accMat(0xfff3c4, 0.2, { clearcoat: 1, metalness: 0.4 }));
-  pin.position.copy(buckle.position).add(new THREE.Vector3(0, 0.09, 0.03));
+  const pin = new THREE.Mesh(new THREE.SphereGeometry(0.065, 12, 10), accMat(0xfff3c4, 0.2, { clearcoat: 1, metalness: 0.4 }));
+  pin.position.copy(buckle.position).add(new THREE.Vector3(0, 0.12, 0.04));
   g.add(pin);
   return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
 }
@@ -3136,15 +3141,15 @@ function makeDuckFloat(ts: Shape[]): AccessoryBuild {
   for (const p of ring) if (p.z > front.z) front = p;
   const hr = 0.21;
   const head = new THREE.Mesh(new THREE.SphereGeometry(hr, 18, 14), yellow);
-  head.position.set(front.x * 0.9, ym + hr + 0.1, front.z + hr * 0.3);
+  head.position.set(front.x * 0.9, ym + 0.24 + hr * 0.72, front.z + 0.04);
   g.add(head);
   const beak = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.24, 12), accMat(0xf28c28, 0.5));
   beak.rotation.x = Math.PI / 2;
-  beak.position.copy(head.position).add(new THREE.Vector3(0, -0.01, hr + 0.08));
+  beak.position.copy(head.position).add(new THREE.Vector3(0, -0.03, hr + 0.05));
   g.add(beak);
   for (const sgn of [1, -1]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), accMat(0x222226, 0.4));
-    eye.position.copy(head.position).add(new THREE.Vector3(sgn * 0.075, 0.07, hr * 0.72));
+    eye.position.copy(head.position).add(new THREE.Vector3(sgn * 0.075, 0.07, hr * 0.8));
     g.add(eye);
   }
   return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
@@ -3180,12 +3185,19 @@ function makeGloves(): AccessoryBuild {
   const py = rig.HAND[1]; // paw centre in arm-local space (follows the arm-length tuning)
   const mk = () => {
     const g = new THREE.Group();
-    const fist = new THREE.Mesh(new THREE.SphereGeometry(0.145, 22, 16), accMat(0xd93a3a, 0.55, { clearcoat: 0.4 }));
-    fist.scale.set(1, 0.94, 1.05);
-    fist.position.set(0, py + 0.01, 0.02);
+    const red = accMat(0xd93a3a, 0.55, { clearcoat: 0.4 });
+    // mitt fully swallowing the paw, knuckles forward
+    const fist = new THREE.Mesh(new THREE.SphereGeometry(0.185, 22, 16), red);
+    fist.scale.set(1, 0.96, 1.08);
+    fist.position.set(0, py + 0.02, 0.02);
     g.add(fist);
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.1, 0.09, 14), accMat(0xf6f2ea, 0.7, { clearcoat: 0.1 }));
-    cuff.position.set(0, py + 0.13, 0.015);
+    // thumb bump on the inner side
+    const thumb = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 10), red);
+    thumb.position.set(0, py + 0.1, 0.12);
+    g.add(thumb);
+    // white cuff toward the elbow
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.115, 0.11, 14), accMat(0xf6f2ea, 0.7, { clearcoat: 0.1 }));
+    cuff.position.set(0, py + 0.19, 0.01);
     g.add(cuff);
     return shadowed(g);
   };
@@ -3198,19 +3210,21 @@ function makeSandal(): AccessoryBuild {
   const mk = () => {
     const g = new THREE.Group();
     const soleM = accMat(0x2f6fd0, 0.7, { clearcoat: 0.1 });
-    const strapM = accMat(0xbfe0ff, 0.6, { clearcoat: 0.2 });
-    const sole = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), soleM);
-    sole.scale.set(0.155, 0.05, 0.25);
-    sole.position.set(0, fy - 0.08, 0.02); // just under the paw bottom
+    const strapM = accMat(0x77b5ff, 0.6, { clearcoat: 0.2 });
+    // flat sole poking out all around under the paw
+    const sole = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.2, 0.06, 20), soleM);
+    sole.scale.z = 1.45;
+    sole.position.set(0, fy - 0.135, 0.03);
     g.add(sole);
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.06, 8), strapM);
-    post.position.set(0, fy - 0.025, 0.13);
+    // toe-post + V strap over the instep
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.09, 8), strapM);
+    post.position.set(0, fy - 0.04, 0.16);
     g.add(post);
     for (const sgn of [1, -1]) {
-      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 0.16), strapM);
-      strap.position.set(sgn * 0.065, fy + 0.02, 0.06);
-      strap.rotation.y = -sgn * 0.45;
-      strap.rotation.x = 0.22;
+      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.2, 8), strapM);
+      strap.position.set(sgn * 0.075, fy + 0.04, 0.08);
+      strap.rotation.z = -sgn * 0.55;
+      strap.rotation.x = -0.5;
       g.add(strap);
     }
     return shadowed(g);
@@ -3298,8 +3312,11 @@ export function warmCharacter(def: AnimalDef) {
 
 export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "none", eyeStyle: EyeStyleId = "default", expression: ExpressionId = "default"): CharacterVisual {
   const isCap = accessory.startsWith("cap");
-  const asset = getAsset(def, accessory === "helmet" || isCap);
-  const uncoveredGeometry = isCap ? getAsset(def).geometry : null;
+  // the fullface helmet and the hockey mask bake the ears away; the loose
+  // geometry comes back when the mask is knocked off
+  const earsHidden = accessory === "helmet" || accessory === "jason" || isCap;
+  const asset = getAsset(def, earsHidden);
+  const uncoveredGeometry = earsHidden ? getAsset(def).geometry : null;
   const bones = PARTS.map((name, i) => {
     const b = new THREE.Bone();
     b.name = name;
