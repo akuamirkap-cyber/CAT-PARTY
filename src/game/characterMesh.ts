@@ -3351,8 +3351,8 @@ function makeGloves(): AccessoryBuild {
     // proportions follow the game4 GlovesModel: egg-shaped mitt (y 1.1),
     // a tall cream cuff that clearly reads at the wrist, thumb on the
     // upper inner face, Champion Red vinyl
-    g.rotation.z = -side * 0.14;
-    g.rotation.x = 0.1;
+    g.rotation.z = -side * 0.1;
+    g.rotation.x = 0.05;
     const red = accMat(0xe23a1e, 0.5, { clearcoat: 0.35 });
     const cuffM = accMat(0xfff7dc, 0.65, { clearcoat: 0.1 });
     const cx = side * px;
@@ -3366,9 +3366,11 @@ function makeGloves(): AccessoryBuild {
     thumb.scale.set(0.9, 1.3, 0.9);
     thumb.position.set(cx + side * pawR * 0.15, py + pawR * 1.05, pz + pawR * 1.35);
     g.add(thumb);
-    // tall cream cuff wrapping the wrist, clearly visible above the ball
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(pawR * 1.7, pawR * 1.9, pawR * 2.4, 16), cuffM);
-    cuff.position.set(cx + side * pawR * 0.2, py + pawR * 1.95, pz + pawR * 0.05);
+    // short cream cuff tucked at the wrist: in the game4 asset the cuff is
+    // only ~half the ball's height (0.5 vs 1.1) and ~70% of its radius, so it
+    // reads as a snug band between arm and ball, never a tall white cup
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(pawR * 1.28, pawR * 1.48, pawR * 1.35, 16), cuffM);
+    cuff.position.set(cx + side * pawR * 0.3, py + pawR * 0.8, pz + pawR * 0.12);
     g.add(cuff);
     return shadowed(g);
   };
