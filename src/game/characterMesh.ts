@@ -3348,24 +3348,27 @@ function makeGloves(): AccessoryBuild {
   const pawR = 0.0765 * (0.7 * TU.armRoot + 0.3 * TU.armTip) * ASSET_LIMB.armR * ASSET_LIMB.pawR;
   const mk = (side: 1 | -1) => {
     const g = new THREE.Group();
-    // hang outward like the reference: cuffs at the wrist, ball drooping
-    // below and clear of the belly (the runtime hang pose pulls the paw
-    // right next to the torso, so the mitt must push itself out)
-    g.rotation.z = -side * 0.12;
-    const red = accMat(0xd93a3a, 0.55, { clearcoat: 0.4 });
+    // proportions follow the game4 GlovesModel: egg-shaped mitt (y 1.1),
+    // a tall cream cuff that clearly reads at the wrist, thumb on the
+    // upper inner face, Champion Red vinyl
+    g.rotation.z = -side * 0.14;
+    g.rotation.x = 0.1;
+    const red = accMat(0xe23a1e, 0.5, { clearcoat: 0.35 });
+    const cuffM = accMat(0xfff7dc, 0.65, { clearcoat: 0.1 });
     const cx = side * px;
-    // big round mitt hanging below-outside the paw
-    const fist = new THREE.Mesh(new THREE.SphereGeometry(pawR * 2.6, 24, 18), red);
-    fist.scale.set(1.05, 1.12, 1.06);
-    fist.position.set(cx + side * pawR * 0.9, py - pawR * 0.55, pz + pawR * 0.5);
+    // egg mitt hanging below-outside the paw — taller than wide
+    const fist = new THREE.Mesh(new THREE.SphereGeometry(pawR * 2.1, 24, 18), red);
+    fist.scale.set(0.94, 1.16, 0.98);
+    fist.position.set(cx + side * pawR * 1.05, py - pawR * 0.35, pz + pawR * 0.45);
     g.add(fist);
-    // small thumb bump on the inner face
-    const thumb = new THREE.Mesh(new THREE.SphereGeometry(pawR * 0.85, 14, 10), red);
-    thumb.position.set(cx + side * pawR * 0.1, py + pawR * 0.9, pz + pawR * 1.6);
+    // thumb bump on the upper inner face (asset: ~45% of the ball, above centre)
+    const thumb = new THREE.Mesh(new THREE.SphereGeometry(pawR * 0.95, 14, 10), red);
+    thumb.scale.set(0.9, 1.3, 0.9);
+    thumb.position.set(cx + side * pawR * 0.15, py + pawR * 1.05, pz + pawR * 1.35);
     g.add(thumb);
-    // tall white cuff wrapping the wrist
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(pawR * 1.6, pawR * 1.35, pawR * 2.0, 16), accMat(0xf6f2ea, 0.7, { clearcoat: 0.1 }));
-    cuff.position.set(cx + side * pawR * 0.25, py + pawR * 1.35, pz + pawR * 0.1);
+    // tall cream cuff wrapping the wrist, clearly visible above the ball
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(pawR * 1.7, pawR * 1.9, pawR * 2.4, 16), cuffM);
+    cuff.position.set(cx + side * pawR * 0.2, py + pawR * 1.95, pz + pawR * 0.05);
     g.add(cuff);
     return shadowed(g);
   };
