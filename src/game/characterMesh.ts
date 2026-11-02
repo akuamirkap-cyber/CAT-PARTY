@@ -2888,6 +2888,15 @@ let SCARF_TORSO: Shape[] = [];
 
 /* ==== accessories ported from the sibling menu games (Bounce Paws & Ball Party) ==== */
 
+/** stable skull-centre anchor in bind space (same anchor the caps mould on) */
+function skullAnchor() {
+  return new THREE.Vector3(0, 0.02 * HS + HO, -0.01 * HS);
+}
+/** only the rounded body blobs: excludes tubes (tail), stripes and detail shells */
+function blobsOnly(shapes: Shape[]) {
+  return shapes.filter((sh) => sh.t === 0 && !sh.noBounds);
+}
+
 function blobBounds(shapes: Shape[]) {
   const mn = new THREE.Vector3(1e9, 1e9, 1e9), mx = new THREE.Vector3(-1e9, -1e9, -1e9);
   for (const sh of shapes) {
@@ -2898,13 +2907,14 @@ function blobBounds(shapes: Shape[]) {
   return { mn, mx };
 }
 
-/** ring of surface points around the torso at height y (bind space) */
+/** ring of surface points around the torso at height y (bind space, body blobs only — never the tail) */
 function torsoRing(ts: Shape[], y: number, pad: number, steps = 28): THREE.Vector3[] {
+  const blobs = blobsOnly(ts);
   const ring: THREE.Vector3[] = [];
   for (let k = 0; k < steps; k++) {
     const a = (k / steps) * Math.PI * 2;
     const d = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
-    const hit = march(ts, new THREE.Vector3(d.x * 2.2, y, d.z * 2.2), d.clone().negate());
+    const hit = march(blobs, new THREE.Vector3(d.x * 1.5, y, d.z * 1.5), d.clone().negate());
     ring.push(new THREE.Vector3(hit.p.x, y, hit.p.z).addScaledVector(d, pad));
   }
   return ring;
@@ -2919,8 +2929,8 @@ function makeCowboy(hs: Shape[]): AccessoryBuild {
   const R = Math.max(0.34 * HS, ((mx.x - mn.x) / 2) * 1.04);
   const felt = accMat(0x9a6b3f, 0.75, { clearcoat: 0.05 });
   const feltDark = accMat(0x5a3a20, 0.8, { clearcoat: 0 });
-  // wavy brim: a squashed torus
-  const brim = new THREE.Mesh(new THREE.TorusGeometry(R * 1.42, R * 0.3, 12, 40), felt);
+  // wavy brim: a squashed torus tucked under the dome edge
+  const brim = new THREE.Mesh(new THREE.TorusGeometry(R * 0.98, R * 0.34, 12, 40), felt);
   brim.scale.set(1, 1, 0.32);
   brim.rotation.x = Math.PI / 2;
   brim.position.set(C.x, C.y + 0.03 * HS, C.z);
@@ -2945,8 +2955,7 @@ function makeCowboy(hs: Shape[]): AccessoryBuild {
 function makeAfro(hs: Shape[]): AccessoryBuild {
   const g = new THREE.Group();
   const body = hs.filter((sh) => sh.t === 0 && !sh.noBounds);
-  const { mn, mx } = blobBounds(body);
-  const Cb = new THREE.Vector3((mn.x + mx.x) / 2, mx.y + 0.01 * HS, (mn.z + mx.z) / 2 - 0.01 * HS);
+  const Cb = skullAnchor();
   const rainbow = [0xe94f4f, 0xf2994a, 0xf2d94a, 0x6fcf6f, 0x56a8f5, 0xa45de8];
   let seed = 7;
   const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
@@ -3023,39 +3032,51 @@ function makeClownNose(hs: Shape[]): AccessoryBuild {
 /** Topeng hoki putih dari Bounce Paws. */
 function makeJason(hs: Shape[]): AccessoryBuild {
   const g = new THREE.Group();
-  const { mn, mx } = blobBounds(hs);
-  const C = toLocal(new THREE.Vector3((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2));
-  const Rx = Math.max(0.34 * HS, (mx.x - mn.x) / 2), Rz = Math.max(0.36 * HS, (mx.z - mn.z) / 2);
+  const Mb = skullAnchor(); // bind space (direction math)
+  const M = toLocal(Mb); // head-bone local (positioning)
   const shellM = accMat(0xf2efe6, 0.45, { clearcoat: 0.35, side: THREE.DoubleSide });
   const holeM = accMat(0x1a1a1e, 0.6);
-  const M = C.clone().add(new THREE.Vector3(0, 0.03 * HS, Rz * 0.66));
-  const Rm = Rx * 0.92;
+  // snug dome over the skull: slightly proud of the cheeks so the face reads through the holes
+  const Rm = 0.6 * HS;
   const shell = new THREE.Mesh(new THREE.SphereGeometry(Rm, 26, 18, 0, Math.PI * 2, 0, Math.PI * 0.62), shellM);
-  shell.rotation.x = -0.42;
-  shell.scale.set(1, 1.04, 0.9);
+  shell.rotation.x = 0.38; // rim dips to the chin in front, clears the muzzle
+  shell.scale.set(1, 1.04, 0.94);
   shell.position.copy(M);
   g.add(shell);
+  /** dark detail lying flat on the shell surface in the given direction from the skull centre */
+  const onShell = (dir: THREE.Vector3) => {
+    const d = dir.clone().normalize();
+    const p = toLocal(M.clone().addScaledVector(d, Rm * 0.97));
+    const look = toLocal(M.clone().addScaledVector(d, Rm * 1.4));
+    const grp = new THREE.Group();
+    grp.position.copy(p);
+    grp.lookAt(look);
+    g.add(grp);
+    return grp;
+  };
+  const ex = EYE.x * TU.eyeX, ey = EYE.y + TU.eyeY + 0.02;
   for (const sgn of [1, -1]) {
-    const hole = new THREE.Mesh(new THREE.CylinderGeometry(Rm * 0.13, Rm * 0.13, 0.05 * HS, 12), holeM);
-    hole.rotation.x = Math.PI / 2 - 0.25;
-    hole.position.set(sgn * Rm * 0.42, M.y + Rm * 0.18, M.z + Rm * 0.58);
-    g.add(hole);
+    const fr = frameAt(hs, sgn * ex, ey, HS, HO, 0.75);
+    const grp = onShell(fr.P.clone().sub(Mb));
+    const hole = new THREE.Mesh(new THREE.CylinderGeometry(0.075 * HS, 0.075 * HS, 0.03 * HS, 12), holeM);
+    hole.rotation.x = Math.PI / 2;
+    grp.add(hole);
   }
-  for (let i = -1; i <= 1; i++) {
-    const vent = new THREE.Mesh(new THREE.BoxGeometry(Rm * 0.13, Rm * 0.07, 0.04 * HS), holeM);
-    vent.position.set(i * Rm * 0.3, M.y - Rm * 0.28, M.z + Rm * 0.66);
-    g.add(vent);
+  for (const [vx, vy] of [[-0.09, -0.75], [0, -0.85], [0.09, -0.75]]) {
+    const grp = onShell(new THREE.Vector3(vx, vy + 0.25, 1.35));
+    const vent = new THREE.Mesh(new THREE.BoxGeometry(0.06 * HS, 0.035 * HS, 0.03 * HS), holeM);
+    grp.add(vent);
   }
-  const scar = new THREE.Mesh(new THREE.BoxGeometry(Rm * 0.07, Rm * 0.42, 0.03 * HS), accMat(0xb03a2e, 0.6));
-  scar.position.set(-Rm * 0.62, M.y - Rm * 0.05, M.z + Rm * 0.52);
+  const scarGrp = onShell(new THREE.Vector3(-1.05, 0.12, 0.55));
+  const scar = new THREE.Mesh(new THREE.BoxGeometry(0.05 * HS, 0.3 * HS, 0.03 * HS), accMat(0xb03a2e, 0.6));
   scar.rotation.z = 0.55;
-  g.add(scar);
+  scarGrp.add(scar);
   return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
 }
 
 /** Sabuk juara dari Ball Party. */
 function makeBelt(ts: Shape[]): AccessoryBuild {
-  const { mn, mx } = blobBounds(ts);
+  const { mn, mx } = blobBounds(blobsOnly(ts));
   const y0 = mn.y + 0.34 * (mx.y - mn.y);
   const ring = torsoRing(ts, y0, 0.045);
   const g = new THREE.Group();
@@ -3078,7 +3099,7 @@ function makeBelt(ts: Shape[]): AccessoryBuild {
 
 /** Celana tinju merah dari Ball Party. */
 function makeBoxers(ts: Shape[]): AccessoryBuild {
-  const { mn, mx } = blobBounds(ts);
+  const { mn, mx } = blobBounds(blobsOnly(ts));
   const yb = mn.y + 0.08 * (mx.y - mn.y);
   const yt = yb + 0.4 * (mx.y - mn.y);
   const bot = torsoRing(ts, yb, 0.07, 30);
@@ -3104,34 +3125,26 @@ function makeBoxers(ts: Shape[]): AccessoryBuild {
 
 /** Pelampung bebek kuning dari Ball Party. */
 function makeDuckFloat(ts: Shape[]): AccessoryBuild {
-  const { mn, mx } = blobBounds(ts);
+  const { mn, mx } = blobBounds(blobsOnly(ts));
   const ym = mn.y + 0.55 * (mx.y - mn.y);
-  const ring = torsoRing(ts, ym, 0.16, 30);
-  const c = ring.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / ring.length);
-  c.y = ym;
-  let R = 0;
-  let front = ring[0];
-  for (const p of ring) {
-    R += Math.hypot(p.x - c.x, p.z - c.z);
-    if (p.z > front.z) front = p;
-  }
-  R /= ring.length;
+  const ring = torsoRing(ts, ym, 0.14, 30);
   const g = new THREE.Group();
   const yellow = accMat(0xf7c948, 0.5, { clearcoat: 0.3 });
-  const torus = new THREE.Mesh(new THREE.TorusGeometry(R, R * 0.3, 14, 30), yellow);
-  torus.rotation.x = Math.PI / 2;
-  torus.position.copy(c);
-  g.add(torus);
-  const head = new THREE.Mesh(new THREE.SphereGeometry(R * 0.3, 18, 14), yellow);
-  head.position.set(front.x, ym + R * 0.3 + R * 0.14, front.z + R * 0.06);
+  // fat tube that hugs the real belly silhouette (same trick as the belt, fatter)
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(ring, true), 120, 0.24, 14, true), yellow));
+  let front = ring[0];
+  for (const p of ring) if (p.z > front.z) front = p;
+  const hr = 0.21;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(hr, 18, 14), yellow);
+  head.position.set(front.x * 0.9, ym + hr + 0.1, front.z + hr * 0.3);
   g.add(head);
-  const beak = new THREE.Mesh(new THREE.ConeGeometry(R * 0.13, R * 0.34, 12), accMat(0xf28c28, 0.5));
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.24, 12), accMat(0xf28c28, 0.5));
   beak.rotation.x = Math.PI / 2;
-  beak.position.copy(head.position).add(new THREE.Vector3(0, -R * 0.02, R * 0.32));
+  beak.position.copy(head.position).add(new THREE.Vector3(0, -0.01, hr + 0.08));
   g.add(beak);
   for (const sgn of [1, -1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.07, 10, 8), accMat(0x222226, 0.4));
-    eye.position.copy(head.position).add(new THREE.Vector3(sgn * R * 0.12, R * 0.1, R * 0.2));
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.032, 10, 8), accMat(0x222226, 0.4));
+    eye.position.copy(head.position).add(new THREE.Vector3(sgn * 0.075, 0.07, hr * 0.72));
     g.add(eye);
   }
   return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
@@ -3139,13 +3152,13 @@ function makeDuckFloat(ts: Shape[]): AccessoryBuild {
 
 /** Sapu punggung dari Bounce Paws. */
 function makeBroom(ts: Shape[]): AccessoryBuild {
-  const { mn, mx } = blobBounds(ts);
+  const { mn, mx } = blobBounds(blobsOnly(ts));
   const y1 = mx.y - 0.16 * (mx.y - mn.y);
-  const back = march(ts, new THREE.Vector3(0.05, y1, -2.2), new THREE.Vector3(0, 0, 1)).p;
+  const back = march(blobsOnly(ts), new THREE.Vector3(0.05, y1, -1.5), new THREE.Vector3(0, 0, 1)).p;
   const g = new THREE.Group();
   const wood = accMat(0xa9805b, 0.8, { clearcoat: 0 });
-  const top = new THREE.Vector3(back.x + 0.2, y1 + 0.95, back.z - 0.2);
-  const bot = new THREE.Vector3(back.x + 0.1, y1 - 0.85, back.z - 0.06);
+  const top = new THREE.Vector3(back.x + 0.22, y1 + 0.62, back.z - 0.16);
+  const bot = new THREE.Vector3(back.x + 0.12, y1 - 0.62, back.z - 0.08);
   g.add(coneAB(top, bot, 0.05, wood, 1, 0.042));
   const straw = accMat(0xd9a441, 0.9, { clearcoat: 0 });
   const cluster = new THREE.Group();
@@ -3164,14 +3177,15 @@ function makeBroom(ts: Shape[]): AccessoryBuild {
 
 /** Sarung tinju merah kembar dari Ball Party (ikut ayun lengan). */
 function makeGloves(): AccessoryBuild {
+  const py = rig.HAND[1]; // paw centre in arm-local space (follows the arm-length tuning)
   const mk = () => {
     const g = new THREE.Group();
-    const fist = new THREE.Mesh(new THREE.SphereGeometry(0.14, 22, 16), accMat(0xd93a3a, 0.55, { clearcoat: 0.4 }));
+    const fist = new THREE.Mesh(new THREE.SphereGeometry(0.145, 22, 16), accMat(0xd93a3a, 0.55, { clearcoat: 0.4 }));
     fist.scale.set(1, 0.94, 1.05);
-    fist.position.set(0, 0.01, 0.02);
+    fist.position.set(0, py + 0.01, 0.02);
     g.add(fist);
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.095, 0.09, 14), accMat(0xf6f2ea, 0.7, { clearcoat: 0.1 }));
-    cuff.position.set(0, 0.14, 0.015);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.125, 0.1, 0.09, 14), accMat(0xf6f2ea, 0.7, { clearcoat: 0.1 }));
+    cuff.position.set(0, py + 0.13, 0.015);
     g.add(cuff);
     return shadowed(g);
   };
@@ -3180,22 +3194,23 @@ function makeGloves(): AccessoryBuild {
 
 /** Sandal jepit biru dari Bounce Paws (ikut kaki). */
 function makeSandal(): AccessoryBuild {
+  const fy = rig.FOOT[1]; // paw centre in leg-local space (follows the leg-length tuning)
   const mk = () => {
     const g = new THREE.Group();
     const soleM = accMat(0x2f6fd0, 0.7, { clearcoat: 0.1 });
     const strapM = accMat(0xbfe0ff, 0.6, { clearcoat: 0.2 });
     const sole = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), soleM);
-    sole.scale.set(0.16, 0.05, 0.26);
-    sole.position.set(0, -0.1, 0.04);
+    sole.scale.set(0.155, 0.05, 0.25);
+    sole.position.set(0, fy - 0.08, 0.02); // just under the paw bottom
     g.add(sole);
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.05, 8), strapM);
-    post.position.set(0, -0.05, 0.14);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.06, 8), strapM);
+    post.position.set(0, fy - 0.025, 0.13);
     g.add(post);
     for (const sgn of [1, -1]) {
-      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 0.17), strapM);
-      strap.position.set(sgn * 0.07, -0.045, 0.05);
+      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 0.16), strapM);
+      strap.position.set(sgn * 0.065, fy + 0.02, 0.06);
       strap.rotation.y = -sgn * 0.45;
-      strap.rotation.x = 0.18;
+      strap.rotation.x = 0.22;
       g.add(strap);
     }
     return shadowed(g);
