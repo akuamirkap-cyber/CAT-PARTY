@@ -3339,54 +3339,67 @@ function makeBroom(ts: Shape[]): AccessoryBuild {
 
 /** Sarung tinju merah kembar dari Ball Party (ikut ayun lengan). */
 function makeGloves(): AccessoryBuild {
-  const py = rig.HAND[1]; // paw centre in arm-local space (follows the arm-length tuning)
-  const mk = () => {
+  // the group rides the arm bone, whose frame is the sculpt limb frame: the
+  // visible paw ball sits at [bow * 0.96, PAW(), 0.03] (B() of the sculpt's
+  // mitten centre) — the physics HAND sits much higher up the arm
+  const py = PAW();
+  const px = ARM_BOW() * 0.96;
+  const pz = 0.03;
+  const pawR = 0.0765 * (0.7 * TU.armRoot + 0.3 * TU.armTip) * ASSET_LIMB.armR * ASSET_LIMB.pawR;
+  const mk = (side: 1 | -1) => {
     const g = new THREE.Group();
     const red = accMat(0xd93a3a, 0.55, { clearcoat: 0.4 });
-    // mitt fully swallowing the paw, knuckles forward
-    const fist = new THREE.Mesh(new THREE.SphereGeometry(0.185, 22, 16), red);
-    fist.scale.set(1, 0.96, 1.08);
-    fist.position.set(0, py + 0.02, 0.02);
+    const cx = side * px;
+    // big round mitt that swallows the whole paw, like the menu games'
+    const fist = new THREE.Mesh(new THREE.SphereGeometry(pawR * 2.4, 24, 18), red);
+    fist.scale.set(1.06, 1.14, 1.1);
+    fist.position.set(cx, py - pawR * 0.15, pz + pawR * 0.3);
     g.add(fist);
     // thumb bump on the inner side
-    const thumb = new THREE.Mesh(new THREE.SphereGeometry(0.075, 12, 10), red);
-    thumb.position.set(0, py + 0.1, 0.12);
+    const thumb = new THREE.Mesh(new THREE.SphereGeometry(pawR * 0.95, 14, 10), red);
+    thumb.position.set(cx - side * pawR * 1.6, py + pawR * 1.0, pz + pawR * 1.3);
     g.add(thumb);
-    // white cuff toward the elbow
-    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.115, 0.11, 14), accMat(0xf6f2ea, 0.7, { clearcoat: 0.1 }));
-    cuff.position.set(0, py + 0.19, 0.01);
+    // white cuff at the wrist, just above the fur mitten line
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(pawR * 1.5, pawR * 1.25, pawR * 1.7, 16), accMat(0xf6f2ea, 0.7, { clearcoat: 0.1 }));
+    cuff.position.set(cx, py + pawR * 2.3, pz);
     g.add(cuff);
     return shadowed(g);
   };
-  return { group: new THREE.Group(), torsoGroup: null, armLGroup: mk(), armRGroup: mk(), googly: [], detachable: false };
+  return { group: new THREE.Group(), torsoGroup: null, armLGroup: mk(1), armRGroup: mk(-1), googly: [], detachable: false };
 }
 
 /** Sandal jepit biru dari Bounce Paws (ikut kaki). */
 function makeSandal(): AccessoryBuild {
-  const fy = rig.FOOT[1]; // paw centre in leg-local space (follows the leg-length tuning)
-  const mk = () => {
+  // the group rides the leg bone in the sculpt leg frame: the visible foot
+  // ball sits at [FOOT_OUT(), footCenterY(), FOOT_FWD()]
+  const fx = FOOT_OUT();
+  const fy = footCenterY();
+  const fz = FOOT_FWD();
+  const fw = 0.105 * ASSET_LIMB.footW; // foot half-width-ish
+  const mk = (side: 1 | -1) => {
     const g = new THREE.Group();
     const soleM = accMat(0x2f6fd0, 0.7, { clearcoat: 0.1 });
     const strapM = accMat(0x77b5ff, 0.6, { clearcoat: 0.2 });
+    const cx = side * fx;
     // flat sole poking out all around under the paw
-    const sole = new THREE.Mesh(new THREE.CylinderGeometry(0.185, 0.2, 0.06, 20), soleM);
-    sole.scale.z = 1.45;
-    sole.position.set(0, fy - 0.135, 0.03);
+    const sole = new THREE.Mesh(new THREE.CylinderGeometry(fw * 1.45, fw * 1.6, 0.055, 20), soleM);
+    sole.scale.z = 1.6;
+    sole.position.set(cx, fy - footRY() * 0.78, fz);
     g.add(sole);
-    // toe-post + V strap over the instep
-    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, 0.09, 8), strapM);
-    post.position.set(0, fy - 0.04, 0.16);
+    // toe-post + V strap hugging the instep
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.07, 8), strapM);
+    post.position.set(cx, fy + footRY() * 0.3, fz + fw * 1.05);
     g.add(post);
     for (const sgn of [1, -1]) {
-      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.026, 0.026, 0.2, 8), strapM);
-      strap.position.set(sgn * 0.075, fy + 0.04, 0.08);
-      strap.rotation.z = -sgn * 0.55;
-      strap.rotation.x = -0.5;
+      const strap = new THREE.Mesh(new THREE.CylinderGeometry(0.024, 0.024, fw * 1.3, 8), strapM);
+      strap.position.set(cx + sgn * fw * 0.28, fy + footRY() * 0.85, fz + fw * 0.1);
+      strap.rotation.z = -sgn * 0.35;
+      strap.rotation.x = -0.45;
       g.add(strap);
     }
     return shadowed(g);
   };
-  return { group: new THREE.Group(), torsoGroup: null, legLGroup: mk(), legRGroup: mk(), googly: [], detachable: false };
+  return { group: new THREE.Group(), torsoGroup: null, legLGroup: mk(1), legRGroup: mk(-1), googly: [], detachable: false };
 }
 
 function buildAccessory(kind: AccessoryId, hs: Shape[], torso: Shape[] = []): AccessoryBuild | null {
