@@ -197,6 +197,14 @@ export default function MenuScreen(props: Props) {
           <span className="mm-game-emoji">🎨</span>
           <span className="mm-game-name">Studio Aset 3D</span>
         </button>
+        <button type="button" className="mm-game-chip" onClick={(e) => { uiBtn(e); onBundledGame("/games/menu-balls/index.html", "Menu Bola"); }} title="3d-game-main-menu-design (1).zip — main menu bola kucing glossy (Bounce Paws)">
+          <span className="mm-game-emoji">🔴</span>
+          <span className="mm-game-name">Menu Bola</span>
+        </button>
+        <button type="button" className="mm-game-chip" onClick={(e) => { uiBtn(e); onBundledGame("/games/menu-layout/index.html", "Menu Layout"); }} title="3d-game-menu-layout.zip — dua kucing melompat di panggung (Ball Party)">
+          <span className="mm-game-emoji">🟧</span>
+          <span className="mm-game-name">Menu Layout</span>
+        </button>
       </nav>
 
       <footer className="mm-bottom">
