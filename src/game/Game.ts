@@ -85,7 +85,20 @@ interface Brain {
   holdT: number;
   aggro: number;
   runFlag: boolean;
-  wander: number;
+  /** patrol waypoint (no enemies left): walk somewhere on purpose */
+  wanderX: number;
+  wanderZ: number;
+  wanderT: number;
+  /** circling at striking distance: flips now and then so it reads as footwork */
+  strafeT: number;
+  strafeDir: number;
+  /** rhythm of actual swings + reaction delay after locking on */
+  strikeT: number;
+  reactT: number;
+  /** give ground for a beat after eating a hit */
+  retreatT: number;
+  /** cooldown for the flying tackle approach */
+  pounceCd: number;
   aimT: number;
   fleeT: number;
   fleeX: number;
@@ -434,7 +447,15 @@ export class Game {
           holdT: 0,
           aggro: 0.6 + Math.random() * 0.4,
           runFlag: false,
-          wander: Math.random() * 10,
+          wanderX: 0,
+          wanderZ: 0,
+          wanderT: 0,
+          strafeT: 0,
+          strafeDir: 1,
+          strikeT: 0.15 + Math.random() * 0.3,
+          reactT: 0,
+          retreatT: 0,
+          pounceCd: 0,
           batPref: Math.random() < 0.65,
           aimT: 0,
           fleeT: 0,
@@ -908,41 +929,120 @@ export class Game {
 
     const t = b.target;
     if (t) {
-      // intercept: aim where the target is GOING, not where they are
       const rawDx = t.position.x - pos.x;
       const rawDz = t.position.z - pos.z;
       const dist = Math.hypot(rawDx, rawDz) || 0.001;
-      const lead = Math.min(0.45, Math.max(0, dist / 12));
-      const dx = rawDx + t.torso.velocity.x * lead;
-      const dz = rawDz + t.torso.velocity.z * lead;
-      const dl = Math.hypot(dx, dz) || 0.001;
-      s.mx = dx / dl;
-      s.mz = dz / dl;
-      s.run = b.runFlag && dist > 3;
-      if (dist < 1.7) {
-        if (!c.weapon && t.weapon && !t.down && !c.holding && c.contestCooldown <= 0 && Math.random() < 0.005) {
-          s.lift = true;
-          return s;
-        }
-        // in melee range
-        s.mx *= 0.35;
-        s.mz *= 0.35;
-        if (t.ko && b.grabT <= 0 && Math.random() < 0.08) b.grabT = 1.0;
-        else if (b.grabT <= 0 && Math.random() < 0.006 * b.aggro) b.grabT = 0.8;
-        b.punchT -= dt;
-        if (b.punchT <= 0 && b.grabT <= 0 && !t.ko) {
-          s.punch = true;
-          b.punchT = 0.22 + Math.random() * (0.6 - b.aggro * 0.3);
-        }
-        if (Math.random() < 0.006 * b.aggro && c.attackCd <= 0) s.headbutt = true;
-      } else if (dist > 3 && dist < 5.5 && c.grounded && Math.random() < 0.004 * b.aggro && c.attackCd <= 0) {
-        s.jump = true;
-        b.dropkickT = 0.2;
+      // aim at where the target is GOING, not where it is right now; up
+      // close the lead matters more — a punch tracks a point 0.2 s ahead
+      const lead = dist < 2.2 ? 0.24 : Math.min(0.45, dist / 12);
+      const aimX = rawDx + t.torso.velocity.x * lead;
+      const aimZ = rawDz + t.torso.velocity.z * lead;
+      const aimL = Math.hypot(aimX, aimZ) || 1;
+      const nx = aimX / aimL;
+      const nz = aimZ / aimL;
+      // Footwork: hold the range and step around the target instead of
+      // shoving into it (that head-down push read as "just following").
+      b.strafeT -= dt;
+      if (b.strafeT <= 0) {
+        b.strafeDir = Math.random() < 0.5 ? -1 : 1;
+        b.strafeT = 1.0 + Math.random() * 1.5;
       }
+      const orbitX = nz * b.strafeDir;
+      const orbitZ = -nx * b.strafeDir;
+      b.strikeT -= dt;
+      b.reactT = Math.max(0, b.reactT - dt);
+      b.retreatT = Math.max(0, b.retreatT - dt);
+      b.pounceCd = Math.max(0, b.pounceCd - dt);
+
+      // Getting hit? Give ground for a moment instead of feeding the swing.
+      if (b.retreatT <= 0 && dist < 3.4 && (c.stagger > 0.12 || c.hurtT > 0.55)) b.retreatT = 0.4 + Math.random() * 0.45;
+
+      const face = wrapAngle(Math.atan2(rawDx, rawDz) - c.facing);
+      const facingTarget = Math.abs(face) < 1.1;
+      // swing only when the target is inside THIS weapon's reach
+      const reach = c.weapon ? 2.15 : 1.6;
+      const swingRange = c.weapon ? 1.95 : 1.22;
+      let mx = 0;
+      let mz = 0;
+      let run = false;
+      if (b.retreatT > 0) {
+        // back off while still watching the fight
+        mx = -nx + orbitX * 0.35;
+        mz = -nz + orbitZ * 0.35;
+        run = true;
+      } else if (dist > 3.1) {
+        mx = nx;
+        mz = nz;
+        run = true;
+      } else if (dist > reach * 0.92) {
+        // close in on a slight arc so the approach is not a straight line
+        mx = nx * 0.9 + orbitX * 0.18;
+        mz = nz * 0.9 + orbitZ * 0.18;
+        run = (b.runFlag && dist > 3) || dist > 3.2;
+      } else {
+        // in range: hold ground, lean in, swing on rhythm (a small weave keeps
+        // it alive without ever circling the foe)
+        mx = nx * 0.55 + orbitX * 0.14;
+        mz = nz * 0.55 + orbitZ * 0.14;
+      }
+
+      // Grab a knocked-out cat and haul it to the edge (unchanged intent).
+      if (t.ko && dist < 2.2 && b.grabT <= 0 && c.grounded && Math.random() < 0.5 * dt * 6) b.grabT = 1.0;
+      // A frisky bot sometimes starts a wrestling match on purpose.
+      else if (!t.ko && b.grabT <= 0 && dist < 1.5 && c.grounded && Math.random() < 0.006 * b.aggro) b.grabT = 0.8;
+
+      // Swing only when squared up AND inside the weapon's reach: random
+      // flailing from out of range or facing away is what made fights dumb.
+      const targetSliding = t.torso.velocity.x * t.torso.velocity.x + t.torso.velocity.z * t.torso.velocity.z > 9;
+      if (dist < swingRange && facingTarget && !targetSliding && b.strikeT <= 0 && b.grabT <= 0 && b.reactT <= 0 && !t.ko && !c.down) {
+        s.punch = true;
+        mx *= 0.3;
+        mz *= 0.3;
+        // better bots swing sooner and more often
+        b.strikeT = 0.24 + Math.random() * (0.55 - b.aggro * 0.3);
+      }
+
+      // Weapon contest: an unarmed cat can try to rip the weapon away.
+      if (dist < 1.7 && !c.weapon && t.weapon && !t.down && !c.holding && c.contestCooldown <= 0 && Math.random() < 0.004 * b.aggro) {
+        s.lift = true;
+        return s;
+      }
+
+      // Flying tackle when the target is running away and the gap is right.
+      const fleeing = (rawDx * t.torso.velocity.x + rawDz * t.torso.velocity.z) / dist > 1.6;
+      if (c.stagger <= 0.1 && b.pounceCd <= 0 && c.attackCd <= 0 && c.grounded && dist > 2.3 && dist < 4.6 &&
+          fleeing && Math.random() < 0.45 * b.aggro) {
+        s.jump = true;
+        b.dropkickT = 0.16;
+        b.pounceCd = 2.6 + Math.random() * 2.2;
+      }
+
+      s.mx = mx;
+      s.mz = mz;
+      s.run = run;
     } else {
-      b.wander += dt;
-      s.mx = Math.cos(b.wander * 0.5) * 0.5;
-      s.mz = Math.sin(b.wander * 0.5) * 0.5;
+      // Patrol: walk to a real waypoint on the plane instead of tracing circles.
+      b.wanderT -= dt;
+      const left = Math.hypot(b.wanderX - pos.x, b.wanderZ - pos.z);
+      if (b.wanderT <= 0 || left < 0.9) {
+        let px = b.wanderX;
+        let pz = b.wanderZ;
+        for (let i = 0; i < 6; i++) {
+          const p = arena.randomSafePoint(0.9);
+          px = p.x;
+          pz = p.z;
+          if (Math.hypot(p.x - pos.x, p.z - pos.z) > 2.4) break;
+        }
+        b.wanderX = px;
+        b.wanderZ = pz;
+        b.wanderT = 3.5 + Math.random() * 3;
+      }
+      const dx = b.wanderX - pos.x;
+      const dz = b.wanderZ - pos.z;
+      const l = Math.hypot(dx, dz) || 1;
+      s.mx = dx / l;
+      s.mz = dz / l;
+      s.run = l > 3.5;
     }
 
     if (b.dropkickT > 0) {
@@ -967,6 +1067,26 @@ export class Game {
           s.mz += (dz / d) * push;
         }
       }
+      const l = Math.hypot(s.mx, s.mz);
+      if (l > 1) {
+        s.mx /= l;
+        s.mz /= l;
+      }
+    }
+
+    // Personal space: cats should not stand inside each other.
+    for (const o of this.chars) {
+      if (o === c || !o.alive) continue;
+      const dx = pos.x - o.position.x;
+      const dz = pos.z - o.position.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > 0.36 || d2 < 1e-6) continue;
+      const d = Math.sqrt(d2);
+      const push = (0.6 - d) * 2.4;
+      s.mx += (dx / d) * push;
+      s.mz += (dz / d) * push;
+    }
+    {
       const l = Math.hypot(s.mx, s.mz);
       if (l > 1) {
         s.mx /= l;
