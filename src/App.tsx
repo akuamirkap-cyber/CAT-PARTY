@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import MenuScreen, { type MenuSheet } from "./components/MenuScreen";
 import MatchLobby from "./components/MatchLobby";
+import GameViewer from "./components/GameViewer";
 import ScreenWipe, { type WipeHandle } from "./components/ScreenWipe";
 import ErrorBoundary from "./components/ErrorBoundary";
 import EyePreview from "./components/EyePreview";
@@ -17,7 +18,7 @@ import { preloadCharacters } from "./game/characterPreload";
 import { disposePortraitFallback, renderPortraitFallback } from "./game/portraitFallback";
 import { setShapeMode, tuningKey, useShapeMode, useTuning } from "./game/tuning";
 
-type Screen = "menu" | "matching" | "game";
+type Screen = "menu" | "matching" | "game" | "games-view";
 type SheetId = MenuSheet | null;
 
 export default function App() {
@@ -50,6 +51,7 @@ export default function App() {
     localStorage.setItem("mb.wipeMode", wipeMode);
   }, [wipeMode]);
   const [gameKey, setGameKey] = useState(0);
+  const [bundled, setBundled] = useState<{ path: string; name: string } | null>(null);
   const [sheet, setSheet] = useState<SheetId>(null);
 
   const wipe = useRef<WipeHandle>(null);
@@ -105,7 +107,13 @@ export default function App() {
 
   return (
     <>
-      {screen === "game" ? (
+      {screen === "games-view" && bundled ? (
+        <ErrorBoundary key="games-view" label="games-view" onReset={() => go("menu")}>
+          <div className="contents">
+            <GameViewer path={bundled.path} name={bundled.name} onExit={() => go("menu")} />
+          </div>
+        </ErrorBoundary>
+      ) : screen === "game" ? (
         <ErrorBoundary key="arena" label="arena" onReset={() => go("menu")}>
         <GameView
           key={gameKey}
@@ -144,6 +152,10 @@ export default function App() {
             active={sheet === null}
             onPlay={start}
             onOpenSheet={(next) => setSheet(next)}
+            onBundledGame={(path, name) => {
+              setBundled({ path, name });
+              go("games-view");
+            }}
             onMode={setMode}
             onBots={setBots}
             onTwoPlayer={setTwoPlayer}
@@ -388,22 +400,26 @@ export default function App() {
               { href: "/games/gameplay-2/index.html", emoji: "💣", name: "Gameplay Fisika — Versi Bom & Bot", desc: "animal-party-physics-gameplay (1).zip: turunan dengan uji bom, bot & aksesoris.", tint: "#e9f6ff" },
               { href: "/games/cat-asset/index.html", emoji: "🎨", name: "Studio Aset 3D — Oyen & Siam", desc: "create-3d-asset-without-hat.zip: pembentuk aset kucing 3D (referensi bentuk).", tint: "#ffe4f1" },
             ].map((g) => (
-              <a
+              <button
                 key={g.href}
-                href={g.href}
-                target="_blank"
-                rel="noreferrer"
-                className="press flex items-center gap-3 rounded-2xl bg-white p-3 shadow-[0_4px_0_rgba(0,0,0,.12)] active:translate-y-0.5"
+                type="button"
+                onClick={(e) => {
+                  uiBtn(e);
+                  setSheet(null);
+                  setBundled({ path: g.href, name: g.name.split("—")[0].trim() });
+                  go("games-view");
+                }}
+                className="press flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left shadow-[0_4px_0_rgba(0,0,0,.12)] active:translate-y-0.5"
               >
                 <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl text-2xl" style={{ background: g.tint }}>{g.emoji}</span>
                 <span className="min-w-0 flex-1">
                   <span className="block text-[13px] font-black text-[#24364f]">{g.name}</span>
                   <span className="block text-[11px] font-bold leading-snug text-slate-500">{g.desc}</span>
                 </span>
-                <span className="rounded-xl bg-[#c9f7c1] px-3 py-1.5 text-[12px] font-black text-[#1d5a1f] shadow-[0_2px_0_#78c96a]">BUKA ↗</span>
-              </a>
+                <span className="rounded-xl bg-[#c9f7c1] px-3 py-1.5 text-[12px] font-black text-[#1d5a1f] shadow-[0_2px_0_#78c96a]">▶ BUKA</span>
+              </button>
             ))}
-            <div className="rounded-2xl bg-[#e9f6ff] p-3 text-[11px] font-bold text-[#083a66]">Ketiganya dibangun dari ZIP di repo ini dan dibuka di tab baru — game Meow Brawl utama tetap jalan di tab ini.</div>
+            <div className="rounded-2xl bg-[#e9f6ff] p-3 text-[11px] font-bold text-[#083a66]">Ketiganya dibangun dari ZIP di repo ini dan dibuka di dalam aplikasi — tekan ‹ MENU atau Esc untuk kembali.</div>
           </div>
         </Sheet>
       )}

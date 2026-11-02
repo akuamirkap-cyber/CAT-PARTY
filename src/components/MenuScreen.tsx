@@ -20,6 +20,7 @@ interface Props {
   active: boolean;
   onPlay: () => void;
   onOpenSheet: (sheet: MenuSheet) => void;
+  onBundledGame: (path: string, name: string) => void;
   onMode: (mode: "brawl" | "bomb" | "teams") => void;
   onBots: (bots: number) => void;
   onTwoPlayer: (on: boolean) => void;
@@ -37,7 +38,7 @@ const ITEMS: { id: MenuSheet | "play"; label: string; icon: typeof Cat; big?: bo
 
 /** Main menu in the orange "matchmaking" style: big left list, cat stage, side cards. */
 export default function MenuScreen(props: Props) {
-  const { selected, accessory, eyeStyle, expression, mode, bots, twoPlayer, active, onPlay, onOpenSheet, onMode, onBots, onTwoPlayer, onSelectAnimal } = props;
+  const { selected, accessory, eyeStyle, expression, mode, bots, twoPlayer, active, onPlay, onOpenSheet, onMode, onBots, onTwoPlayer, onSelectAnimal, onBundledGame } = props;
   const [cursor, setCursor] = useState(0);
   const sel = animalById(selected);
 
@@ -184,18 +185,18 @@ export default function MenuScreen(props: Props) {
       {/* the other games bundled in this repo, right under the menu screen */}
       <nav className="mm-games" aria-label="Game lain di repo ini">
         <span className="mm-games-title">🎮 GAME LAIN:</span>
-        <a className="mm-game-chip" href="/games/gameplay-1/index.html" target="_blank" rel="noreferrer" title="animal-party-physics-gameplay.zip — versi pertama">
+        <button type="button" className="mm-game-chip" onClick={(e) => { uiBtn(e); onBundledGame("/games/gameplay-1/index.html", "Gameplay Asli"); }} title="animal-party-physics-gameplay.zip — versi pertama">
           <span className="mm-game-emoji">🐈</span>
           <span className="mm-game-name">Gameplay Asli</span>
-        </a>
-        <a className="mm-game-chip" href="/games/gameplay-2/index.html" target="_blank" rel="noreferrer" title="animal-party-physics-gameplay (1).zip — bom, bot & aksesoris">
+        </button>
+        <button type="button" className="mm-game-chip" onClick={(e) => { uiBtn(e); onBundledGame("/games/gameplay-2/index.html", "Versi Bom & Bot"); }} title="animal-party-physics-gameplay (1).zip — bom, bot & aksesoris">
           <span className="mm-game-emoji">💣</span>
           <span className="mm-game-name">Versi Bom & Bot</span>
-        </a>
-        <a className="mm-game-chip" href="/games/cat-asset/index.html" target="_blank" rel="noreferrer" title="create-3d-asset-without-hat.zip — studio aset kucing 3D">
+        </button>
+        <button type="button" className="mm-game-chip" onClick={(e) => { uiBtn(e); onBundledGame("/games/cat-asset/index.html", "Studio Aset 3D"); }} title="create-3d-asset-without-hat.zip — studio aset kucing 3D">
           <span className="mm-game-emoji">🎨</span>
           <span className="mm-game-name">Studio Aset 3D</span>
-        </a>
+        </button>
       </nav>
 
       <footer className="mm-bottom">

@@ -3,7 +3,7 @@ import { runPageWipe, WIPE_TIMING } from "./pageWipe";
 import type { WipeTiming } from "./pageWipe";
 
 /** Screens that can be swapped behind the wipe. */
-export type ScreenKey = "menu" | "matching" | "game";
+export type ScreenKey = "menu" | "matching" | "game" | "games-view";
 
 export interface WipeTheme {
   /** Wipe panel colour */
@@ -20,6 +20,7 @@ export const WIPE_THEMES: Record<ScreenKey, WipeTheme> = {
   menu: { main: "#ffa412", deep: "#e57f00", ink: "#7a3d00", label: "MAIN MENU", sub: "Kembali ke markas" },
   matching: { main: "#ffa412", deep: "#e57f00", ink: "#7a3d00", label: "MATCHMAKING", sub: "Mencari lawan" },
   game: { main: "#1b8cf0", deep: "#0f63c4", ink: "#05325e", label: "SIAP GEBUK", sub: "Semua naik ke pesawat" },
+  "games-view": { main: "#22b1e8", deep: "#0f93c9", ink: "#04304a", label: "GAME LAIN", sub: "Dari repo yang sama" },
 };
 
 export { WIPE_TIMING };
