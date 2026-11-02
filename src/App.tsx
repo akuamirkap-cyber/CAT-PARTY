@@ -8,7 +8,7 @@ import GameView from "./components/GameView";
 import Portrait from "./components/Portrait";
 import TuningPanel from "./components/TuningPanel";
 import { JuicyButton, Sheet, Toggle, TONES, uiBtn } from "./components/ui";
-import { Cat, Eye, Smile } from "lucide-react";
+import { Cat, Eye, Gamepad2, Smile } from "lucide-react";
 import { ACCESSORIES, ANIMALS, animalById, type AccessoryId, type AnimalId } from "./game/animals";
 import { EYE_STYLES, EXPRESSIONS, type EyeStyleId, type ExpressionId } from "./game/eyes";
 import { initAudio } from "./game/audio";
@@ -376,6 +376,34 @@ export default function App() {
               </div>
             ))}
             <div className="rounded-2xl bg-[#e9f6ff] p-3 text-[11px] font-bold text-[#083a66]">P2: panah · Num0/Enter lompat · Num1 pukul · Num2 angkat/lempar · Num3 terjang · Num4 angkat/rebut · RShift lari.</div>
+          </div>
+        </Sheet>
+      )}
+
+      {sheet === "games" && (
+        <Sheet title="Game Lain di Repo Ini" icon={<Gamepad2 size={22} />} onClose={() => setSheet(null)} footer={<JuicyButton tone="yellow" size="lg" block onClick={() => setSheet(null)}>MANTAP!</JuicyButton>}>
+          <div className="space-y-2">
+            {[
+              { href: "/games/gameplay-1/index.html", emoji: "🐈", name: "Gameplay Fisika — Versi Asli", desc: "animal-party-physics-gameplay.zip: arena Animal Party versi pertama.", tint: "#ffe9c4" },
+              { href: "/games/gameplay-2/index.html", emoji: "💣", name: "Gameplay Fisika — Versi Bom & Bot", desc: "animal-party-physics-gameplay (1).zip: turunan dengan uji bom, bot & aksesoris.", tint: "#e9f6ff" },
+              { href: "/games/cat-asset/index.html", emoji: "🎨", name: "Studio Aset 3D — Oyen & Siam", desc: "create-3d-asset-without-hat.zip: pembentuk aset kucing 3D (referensi bentuk).", tint: "#ffe4f1" },
+            ].map((g) => (
+              <a
+                key={g.href}
+                href={g.href}
+                target="_blank"
+                rel="noreferrer"
+                className="press flex items-center gap-3 rounded-2xl bg-white p-3 shadow-[0_4px_0_rgba(0,0,0,.12)] active:translate-y-0.5"
+              >
+                <span className="grid h-12 w-12 shrink-0 place-items-center rounded-xl text-2xl" style={{ background: g.tint }}>{g.emoji}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-black text-[#24364f]">{g.name}</span>
+                  <span className="block text-[11px] font-bold leading-snug text-slate-500">{g.desc}</span>
+                </span>
+                <span className="rounded-xl bg-[#c9f7c1] px-3 py-1.5 text-[12px] font-black text-[#1d5a1f] shadow-[0_2px_0_#78c96a]">BUKA ↗</span>
+              </a>
+            ))}
+            <div className="rounded-2xl bg-[#e9f6ff] p-3 text-[11px] font-bold text-[#083a66]">Ketiganya dibangun dari ZIP di repo ini dan dibuka di tab baru — game Meow Brawl utama tetap jalan di tab ini.</div>
           </div>
         </Sheet>
       )}

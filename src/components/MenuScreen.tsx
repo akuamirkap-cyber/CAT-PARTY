@@ -6,7 +6,7 @@ import { animalById, type AccessoryId, type AnimalId } from "../game/animals";
 import type { EyeStyleId, ExpressionId } from "../game/eyes";
 import { Toggle, uiBtn } from "./ui";
 
-export type MenuSheet = "char" | "acc" | "eyes" | "tuning" | "settings" | "info" | "mission";
+export type MenuSheet = "char" | "acc" | "eyes" | "tuning" | "settings" | "info" | "mission" | "games";
 
 interface Props {
   selected: AnimalId;
@@ -103,6 +103,7 @@ export default function MenuScreen(props: Props) {
           <button type="button" className="mm-mode-chip" onClick={(e) => { uiBtn(e); onMode(mode === "brawl" ? "bomb" : mode === "bomb" ? "teams" : "brawl"); }} aria-label="Ganti mode">
             {mode === "brawl" ? "⚔️ BRAWL" : mode === "bomb" ? "💣 BOM" : "🚩 TIM 5V5"}
           </button>
+          <button type="button" className="mm-icon" aria-label="Game lain di GitHub" onClick={(e) => { uiBtn(e); onOpenSheet("games"); }}><Gamepad2 size={20} /></button>
           <button type="button" className="mm-icon" aria-label="Cara main" onClick={(e) => { uiBtn(e); onOpenSheet("info"); }}><CircleHelp size={20} /></button>
           <button type="button" className="mm-icon" aria-label="Setelan" onClick={(e) => { uiBtn(e); onOpenSheet("settings"); }}><Settings2 size={20} /></button>
         </div>
