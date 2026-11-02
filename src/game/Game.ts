@@ -24,7 +24,7 @@ export interface GameOptions {
   p1Eyes?: EyeStyleId;
   p1Expression?: ExpressionId;
   bots: number;
-  mode: "brawl" | "bomb";
+  mode: "brawl" | "bomb" | "teams";
   camMode: "stumble" | "gang";
   camZoom: number; // 0.7 dekat · 1 normal · 1.35 jauh
   onHud: (s: HudState) => void;
@@ -44,6 +44,7 @@ export interface HudPlayer {
   alive: boolean;
   slot: number;
   wins: number;
+  team: number;
 }
 
 export interface HudState {
@@ -56,11 +57,18 @@ export interface HudState {
   players: HudPlayer[];
   feed: { id: number; text: string }[];
   banner: string | null;
-  winner: { name: string; emoji: string; human: boolean; animal: AnimalId | null; eyeStyle: EyeStyleId; expression: ExpressionId } | null;
+  winner: { name: string; emoji: string; human: boolean; animal: AnimalId | null; eyeStyle: EyeStyleId; expression: ExpressionId; team?: 0 | 1 } | null;
   meAlive: boolean;
-  mode: "brawl" | "bomb";
+  mode: "brawl" | "bomb" | "teams";
+  teamMode: boolean;
+  teamWins: [number, number];
+  teamAlive: [number, number];
   bombs: number;
   weaponContest: { owner: string; challenger: string; ownerPresses: number; challengerPresses: number; p1: boolean; p2: boolean } | null;
+}
+
+export interface TeamWinner {
+  team: 0 | 1;
 }
 
 export interface RosterEntry {
@@ -71,6 +79,7 @@ export interface RosterEntry {
   name: string;
   slot: 0 | 1 | 2;
   wins: number;
+  team: number;
 }
 
 interface Brain {
@@ -107,9 +116,23 @@ interface Brain {
 }
 
 /** Build once before loading so the worker prepares the same cats used by the match. */
-export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "p1Acc" | "p2Acc" | "p1Eyes" | "p1Expression" | "twoPlayer" | "bots">): RosterEntry[] {
-  const roster: RosterEntry[] = [{ def: animalById(opts.p1Animal), name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc, eyeStyle: opts.p1Eyes ?? "default", expression: opts.p1Expression ?? "default" }];
-  if (opts.twoPlayer) roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: "default", expression: "default" });
+export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "p1Acc" | "p2Acc" | "p1Eyes" | "p1Expression" | "twoPlayer" | "bots" | "mode">): RosterEntry[] {
+  const teams = opts.mode === "teams";
+  const counts = [0, 0];
+  const pickTeam = () => {
+    // P1 opens on red, P2 anchors blue; bots balance to a 5v5 split
+    const t = counts[0] <= counts[1] ? 0 : 1;
+    counts[t]++;
+    return t;
+  };
+  const roster: RosterEntry[] = [{
+    def: animalById(opts.p1Animal), name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc,
+    eyeStyle: opts.p1Eyes ?? "default", expression: opts.p1Expression ?? "default", team: teams ? pickTeam() : -1,
+  }];
+  if (opts.twoPlayer) {
+    roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: "default", expression: "default", team: teams ? 1 : -1 });
+    if (teams) counts[1]++;
+  }
   const used = new Set<AnimalId>(roster.map(r => r.def.id));
   const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
   for (let i = 0; i < opts.bots; i++) {
@@ -118,7 +141,7 @@ export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "
     const def = pool[Math.floor(Math.random() * pool.length)];
     used.add(def.id);
     const acc: AccessoryId = Math.random() < 0.7 ? ACCESSORIES[1 + Math.floor(Math.random() * (ACCESSORIES.length - 1))].id : "none";
-    roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: "default", expression: "default" });
+    roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: "default", expression: "default", team: teams ? pickTeam() : -1 });
   }
   return roster;
 }
@@ -165,6 +188,7 @@ export class Game {
   arena: Arena | null = null;
   chars: Character[] = [];
   brains = new Map<Character, Brain>();
+  teamWins: [number, number] = [0, 0];
   roster: RosterEntry[] = [];
   phase: HudState["phase"] = "countdown";
   countdown = 3.5;
@@ -425,6 +449,12 @@ export class Game {
       const fx = -3.0 + (i / Math.max(1, n - 1)) * 5.5 + (this.round % 2 ? 0.3 : -0.3);
       const fz = (i % 2 === 0 ? 1 : -1) * [0.5, 0.9, 1.9][i % 3];
       const pos = new THREE.Vector3(fx, 0.05, fz);
+      if (this.opts.mode === "teams" && r.team >= 0) {
+        // start on your own half: red on the left wing, blue on the right
+        const side = r.team === 0 ? -1 : 1;
+        const k = i % 5;
+        pos.set(side * (0.8 + (k % 2) * 1.5 + (k % 3) * 0.5), 0.05, -2.2 + k * 1.1 + (r.team === 0 ? -0.3 : 0.3));
+      }
       if (!this.arena!.isSafe(pos.x, pos.z, 0.3)) {
         const s = this.arena!.randomSafePoint(0.5);
         pos.set(s.x, 0.05, s.z);
@@ -433,6 +463,7 @@ export class Game {
       const yaw = Math.atan2(-pos.x, -pos.z);
       const c = new Character(this.world, i, r.def, r.name, r.slot, this.hooks, pos, yaw, emptyControl(), r.acc, r.eyeStyle, r.expression);
       c.wins = r.wins;
+      c.team = r.team;
       this.scene.add(c.root);
       this.chars.push(c);
       if (r.slot === 0) {
@@ -489,6 +520,7 @@ export class Game {
   restart() {
     if (this.disposed) return;
     this.round = 0;
+    this.teamWins = [0, 0];
     for (const r of this.roster) r.wins = 0;
     this.startRound();
     this.setBanner("ULANG PERTANDINGAN!");
@@ -638,7 +670,7 @@ export class Game {
       let best: Character | null = null;
       let bestScore = Infinity;
       for (const o of this.chars) {
-        if (o === c || !o.alive) continue;
+        if (o === c || !o.alive || (c.team >= 0 && o.team === c.team)) continue;
         const d = Math.hypot(o.position.x - pos.x, o.position.z - pos.z);
         const score = d + (o.ko ? -3 : 0) + Math.random() * 3 + (o.isHuman ? -0.8 : 0);
         if (score < bestScore) {
@@ -697,7 +729,7 @@ export class Game {
       let victim: Character | null = null;
       let bestScore = Infinity;
       for (const o of this.chars) {
-        if (o === c || !o.alive) continue;
+        if (o === c || !o.alive || (c.team >= 0 && o.team === c.team)) continue;
         const d = Math.hypot(o.position.x - pos.x, o.position.z - pos.z);
         let cluster = 0;
         for (const q of this.chars) {
@@ -1317,12 +1349,13 @@ export class Game {
         }
         const killer = c.lastHitBy && c.time - c.lastHitAt < 7 && c.lastHitBy !== c ? c.lastHitBy : null;
         const byBomb = this.opts.mode === "bomb" && c.lastHitKind === "bomb";
+        const tag = (x: Character) => (this.opts.mode === "teams" ? `${x.team === 0 ? "🟥" : "🟦"} ` : "");
         this.pushFeed(
           killer
             ? byBomb
-              ? `💥 ${killer.name} meledakkan ${c.def.emoji} ${c.name} keluar!`
-              : `${killer.def.emoji} ${killer.name} melempar ${c.def.emoji} ${c.name} keluar!`
-            : `${c.def.emoji} ${c.name} jatuh sendiri 🤦`
+              ? `💥 ${tag(killer)}${killer.name} meledakkan ${tag(c)}${c.def.emoji} ${c.name} keluar!`
+              : `${tag(killer)}${killer.def.emoji} ${killer.name} melempar ${tag(c)}${c.def.emoji} ${c.name} keluar!`
+            : `${tag(c)}${c.def.emoji} ${c.name} jatuh sendiri 🤦`
         );
         if (c.isHuman) this.setBanner(c.humanSlot === 1 ? "KAMU TERSINGKIR!" : "P2 TERSINGKIR!");
         sfx.fall();
@@ -1333,7 +1366,22 @@ export class Game {
     // round end
     if (this.phase === "playing") {
       const alive = this.chars.filter((c) => c.alive);
-      if (alive.length <= 1) {
+      if (this.opts.mode === "teams") {
+        // team match: the round ends when a whole team is gone
+        const aliveT = [0, 0];
+        for (const c of alive) if (c.team >= 0) aliveT[c.team]++;
+        if (aliveT[0] === 0 || aliveT[1] === 0) {
+          this.phase = "roundEnd";
+          const win: 0 | 1 | null = aliveT[0] > 0 ? 0 : aliveT[1] > 0 ? 1 : null;
+          if (win !== null) this.teamWins[win]++;
+          const humanWin = win !== null && alive.some((c) => c.isHuman && c.team === win);
+          this.winner = win === null
+            ? { name: "Seri", emoji: "🤝", human: false, animal: null, eyeStyle: "default", expression: "default" }
+            : { name: win === 0 ? "TIM MERAH" : "TIM BIRU", emoji: win === 0 ? "🟥" : "🟦", human: humanWin, animal: null, eyeStyle: "default", expression: "default", team: win };
+          sfx.win();
+          this.emitHud();
+        }
+      } else if (alive.length <= 1) {
         this.phase = "roundEnd";
         const w = alive[0];
         if (w) {
@@ -1466,12 +1514,19 @@ export class Game {
         alive: c.alive,
         slot: c.humanSlot,
         wins: c.wins,
+        team: c.team,
       })),
       feed: this.feed.map((f) => ({ id: f.id, text: f.text })),
       banner: this.banner?.text ?? null,
       winner: this.winner,
       meAlive: !!me?.alive,
       mode: this.opts.mode,
+      teamMode: this.opts.mode === "teams",
+      teamWins: [this.teamWins[0], this.teamWins[1]],
+      teamAlive: [
+        this.chars.filter((c) => c.alive && c.team === 0).length,
+        this.chars.filter((c) => c.alive && c.team === 1).length,
+      ],
       bombs: this.bombs?.live.length ?? 0,
       weaponContest: contest ? {
         owner: contest.owner.name, challenger: contest.challenger.name,

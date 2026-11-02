@@ -146,7 +146,16 @@ export default function GameView({ options, showTouch, onExit }: Props) {
               🔍 {camZoom === 0.7 ? "DEKAT" : camZoom === 1.35 ? "JAUH" : "NORMAL"}
             </button>
             <div className="rounded-2xl bg-slate-900/60 px-3 py-2 text-sm font-bold text-white shadow-md">
-              Ronde {hud.round} · 🐾 {hud.alive}/{hud.total} tersisa
+              {hud.teamMode ? (
+                <>
+                  Ronde {hud.round} · <span className="font-black text-red-300">🟥 {hud.teamAlive[0]}/{hud.total / 2}</span>
+                  {" — "}
+                  <span className="font-black text-sky-300">🟦 {hud.teamAlive[1]}/{hud.total / 2}</span>
+                  <span className="ml-2 rounded-full bg-white/15 px-2 py-0.5">🏆 {hud.teamWins[0]} : {hud.teamWins[1]}</span>
+                </>
+              ) : (
+                <>Ronde {hud.round} · 🐾 {hud.alive}/{hud.total} tersisa</>
+              )}
               {hud.mode === "bomb" && <span className="ml-1 rounded-full bg-red-500/80 px-2 py-0.5">💣 {hud.bombs}</span>}
             </div>
           </div>
@@ -181,7 +190,11 @@ export default function GameView({ options, showTouch, onExit }: Props) {
           {/* player status */}
           <div className={`absolute left-3 flex flex-col gap-2 ${showTouch ? "top-16" : "bottom-3"}`}>
             {[me, p2].filter(Boolean).map((p) => (
-              <div key={p!.id} className="flex items-center gap-2 rounded-2xl bg-white/90 p-2 pr-4 shadow-lg">
+              <div
+                key={p!.id}
+                className="flex items-center gap-2 rounded-2xl bg-white/90 p-2 pr-4 shadow-lg"
+                style={hud.teamMode && p!.team >= 0 ? { borderTop: `4px solid ${p!.team === 0 ? "#e8343c" : "#2f6fe0"}` } : undefined}
+              >
                 <div className="flex h-11 w-11 items-center justify-center overflow-hidden rounded-xl text-2xl" style={{ background: p!.color }}>
                   {p!.alive ? <Portrait id={p!.animal} fallback={p!.emoji} eyeStyle={p!.eyeStyle} expression={p!.expression} /> : "💀"}
                 </div>
@@ -206,20 +219,38 @@ export default function GameView({ options, showTouch, onExit }: Props) {
 
           {/* opponents strip */}
           {!showTouch && (
-            <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 gap-2">
-              {hud.players
-                .filter((p) => p.slot === 0)
-                .map((p) => (
-                  <div key={p.id} className={`flex flex-col items-center ${p.alive ? "" : "opacity-40 grayscale"}`}>
-                    <div className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border-4 border-white text-2xl shadow-md" style={{ background: p.color }}>
-                      {p.alive ? <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} /> : "💀"}
-                      {p.ko && <span className="absolute -top-2 text-sm">💫</span>}
+            <div className="absolute bottom-3 left-1/2 flex -translate-x-1/2 items-end gap-2">
+              {hud.teamMode
+                ? [0, 1].map((team) => (
+                    <div key={team} className={`flex gap-1.5 rounded-2xl p-1.5 ${team === 0 ? "bg-red-500/25" : "bg-sky-500/25"}`}>
+                      {hud.players
+                        .filter((p) => p.slot === 0 && p.team === team)
+                        .map((p) => (
+                          <div key={p.id} className={`flex flex-col items-center ${p.alive ? "" : "opacity-40 grayscale"}`}>
+                            <div className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border-4 border-white text-2xl shadow-md" style={{ background: p.color }}>
+                              {p.alive ? <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} /> : "💀"}
+                              {p.ko && <span className="absolute -top-2 text-sm">💫</span>}
+                            </div>
+                            <div className="mt-1 h-1.5 w-12 overflow-hidden rounded-full bg-white/60">
+                              <div className="h-full bg-red-500" style={{ width: `${p.ko ? 100 : Math.min(100, p.dizzy)}%` }} />
+                            </div>
+                          </div>
+                        ))}
                     </div>
-                    <div className="mt-1 h-1.5 w-12 overflow-hidden rounded-full bg-white/60">
-                      <div className="h-full bg-red-500" style={{ width: `${p.ko ? 100 : Math.min(100, p.dizzy)}%` }} />
-                    </div>
-                  </div>
-                ))}
+                  ))
+                : hud.players
+                    .filter((p) => p.slot === 0)
+                    .map((p) => (
+                      <div key={p.id} className={`flex flex-col items-center ${p.alive ? "" : "opacity-40 grayscale"}`}>
+                        <div className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-xl border-4 border-white text-2xl shadow-md" style={{ background: p.color }}>
+                          {p.alive ? <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} /> : "💀"}
+                          {p.ko && <span className="absolute -top-2 text-sm">💫</span>}
+                        </div>
+                        <div className="mt-1 h-1.5 w-12 overflow-hidden rounded-full bg-white/60">
+                          <div className="h-full bg-red-500" style={{ width: `${p.ko ? 100 : Math.min(100, p.dizzy)}%` }} />
+                        </div>
+                      </div>
+                    ))}
             </div>
           )}
 
@@ -265,6 +296,11 @@ export default function GameView({ options, showTouch, onExit }: Props) {
                   💣 MODE BOM: Angkat bom (E) &amp; lempar cepat sebelum meledak! Jauhi lingkaran merah. Bom makin banyak seiring waktu!
                 </div>
               )}
+              {hud.teamMode && (
+                <div className="mt-1 rounded-lg bg-sky-500/25 p-2 font-bold text-sky-100">
+                  🚩 TIM 5V5: Tim kamu berlingkar <b className="text-red-300">merah</b>, lawan <b className="text-sky-300">biru</b>. Pukulanmu tidak bisa melukai teman setim — habisi satu tim untuk menang!
+                </div>
+              )}
             </div>
           )}
 
@@ -276,18 +312,35 @@ export default function GameView({ options, showTouch, onExit }: Props) {
                   {hud.winner.animal ? <Portrait id={hud.winner.animal} fallback={hud.winner.emoji} eyeStyle={hud.winner.eyeStyle} expression={hud.winner.expression} /> : hud.winner.emoji}
                 </div>
                 <div className="mt-2 text-3xl font-black text-slate-800">
-                  {hud.winner.name === "Seri" ? "SERI!" : hud.winner.human ? (hud.winner.name === "KAMU" ? "KAMU MENANG! 🎉" : `${hud.winner.name} MENANG!`) : `${hud.winner.name} menang`}
+                  {hud.winner.name === "Seri"
+                    ? "SERI!"
+                    : hud.winner.human
+                      ? hud.winner.team !== undefined
+                        ? "TIMMU MENANG! 🎉"
+                        : hud.winner.name === "KAMU"
+                          ? "KAMU MENANG! 🎉"
+                          : `${hud.winner.name} MENANG!`
+                      : `${hud.winner.name} MENANG!`}
                 </div>
+                {hud.teamMode && (
+                  <div className="mt-1 text-lg font-black text-slate-600">
+                    <span className="text-red-500">🟥 {hud.teamWins[0]}</span> — <span className="text-blue-600">{hud.teamWins[1]} 🟦</span>
+                  </div>
+                )}
                 <div className="mt-4 space-y-1.5">
                   {[...hud.players]
-                    .sort((a, b) => b.wins - a.wins)
+                    .sort((a, b) => (hud.teamMode ? (a.team - b.team || b.wins - a.wins) : b.wins - a.wins))
                     .map((p) => (
-                      <div key={p.id} className={`flex items-center gap-3 rounded-xl px-3 py-1.5 ${p.slot ? "bg-yellow-100" : "bg-slate-100"}`}>
+                      <div
+                        key={p.id}
+                        className={`flex items-center gap-3 rounded-xl px-3 py-1.5 ${p.slot ? "bg-yellow-100" : "bg-slate-100"}`}
+                        style={hud.teamMode && p.team >= 0 ? { borderLeft: `6px solid ${p.team === 0 ? "#e8343c" : "#2f6fe0"}` } : undefined}
+                      >
                         <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg text-xl" style={{ background: p.color }}>
                           <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} />
                         </span>
-                        <span className="flex-1 text-left text-sm font-bold text-slate-700">{p.slot === 1 ? "KAMU" : p.name}</span>
-                        <span className="text-sm font-black text-amber-600">🏆 {p.wins}</span>
+                        <span className="flex-1 text-left text-sm font-bold text-slate-700">{p.slot === 1 ? "KAMU" : p.name}{hud.teamMode && p.team >= 0 ? (p.team === 0 ? " 🟥" : " 🟦") : ""}</span>
+                        <span className="text-sm font-black text-amber-600">{hud.teamMode ? (p.alive ? "✅" : "💀") : `🏆 ${p.wins}`}</span>
                       </div>
                     ))}
                 </div>

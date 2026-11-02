@@ -193,6 +193,8 @@ export class Character {
   name: string;
   isHuman: boolean;
   humanSlot: 0 | 1 | 2;
+  /** 0 = red team, 1 = blue team, -1 = free-for-all (no teams) */
+  team = -1;
   world: CANNON.World;
   hooks: CharacterHooks;
 
@@ -209,6 +211,7 @@ export class Character {
   visual: CharacterVisual;
   root = new THREE.Group();
   nameTag: THREE.Sprite;
+  teamRing: THREE.Mesh | null = null;
   stars = new THREE.Group();
 
   // state
@@ -370,6 +373,10 @@ export class Character {
 
     this.nameTag = makeNameTag(this.isHuman ? (humanSlot === 1 ? "KAMU" : "P2") : name, this.isHuman, humanSlot);
     this.root.add(this.nameTag);
+
+    // team ring painted on the deck under the cat (team matches only)
+    this.teamRing = makeTeamRing(this.team);
+    if (this.teamRing) this.root.add(this.teamRing);
 
     // KO stars
     const starGeo = new THREE.OctahedronGeometry(0.09, 0);
@@ -875,6 +882,7 @@ export class Character {
     let best: Character | null = null, bestDist = 1.8;
     for (const other of Character.all) {
       if (other === this || !other.weapon || other.weaponContest || other.down || !other.alive || other.removed) continue;
+      if (this.team >= 0 && other.team === this.team) continue;
       const dx = other.position.x - this.position.x, dz = other.position.z - this.position.z;
       const d = Math.hypot(dx, dz);
       if (d >= bestDist || Math.abs(other.position.y - this.position.y) > 1.3) continue;
@@ -1678,7 +1686,7 @@ export class Character {
     for (const b of this.world.bodies) {
       if (b.type !== CANNON.Body.DYNAMIC) continue;
       const info = bodyOwner.get(b);
-      if (info && (info.char === this || !info.char.alive || (info.part !== "torso" && info.part !== "head"))) continue;
+      if (info && (info.char === this || !info.char.alive || (this.team >= 0 && info.char.team === this.team) || (info.part !== "torso" && info.part !== "head"))) continue;
       const dx = b.position.x - cx,
         dy = b.position.y - cy,
         dz = b.position.z - cz;
@@ -1732,7 +1740,8 @@ export class Character {
     if (otherChar && (otherChar === this || !otherChar.alive)) return;
 
     // GRAB
-    if ((part === "armL" || part === "armR") && this.input.grab && !this.holds[part] && !this.weaponContest) {
+    const mate = otherChar && this.team >= 0 && otherChar.team === this.team;
+    if ((part === "armL" || part === "armR") && this.input.grab && !this.holds[part] && !this.weaponContest && !mate) {
       const arm = this[part];
       const hand = arm.pointToWorldFrame(HAND, new CANNON.Vec3());
       if (hand.distanceTo(point) < 0.4) this.attachHold(part, other, otherChar ?? null);
@@ -1742,7 +1751,7 @@ export class Character {
     // Punches are resolved once, after all contacts, by sweepPunch(). This
     // avoids contact-order favouring a farther cat over the closest one.
     // The tackle only hits cats in the launch direction, once per launch.
-    if (this.dropkickTimer > 0 && part !== "armL" && part !== "armR" && !this.hitSet.has(otherChar) && this.inFront(otherChar, this.dashDirection)) {
+    if (this.dropkickTimer > 0 && !mate && part !== "armL" && part !== "armR" && !this.hitSet.has(otherChar) && this.inFront(otherChar, this.dashDirection)) {
       this.hitSet.add(otherChar);
       otherChar.receiveHit(this, 40, this.dashDirection, 11, other, point, "dropkick");
       for (const body of this.parts) {
@@ -1773,6 +1782,7 @@ export class Character {
     let nearest: Character | null = null, best = range;
     for (const target of Character.all) {
       if (target === this || target.removed || !target.alive) continue;
+      if (this.team >= 0 && target.team === this.team) continue; // team matches: never aim at a mate
       const dx = target.position.x - origin.x, dy = target.position.y - origin.y, dz = target.position.z - origin.z;
       const planar = Math.hypot(dx, dz), distance = Math.hypot(planar, dy);
       if (distance >= best || Math.abs(dy) > 1.25) continue;
@@ -1868,6 +1878,8 @@ export class Character {
   }
 
   receiveHit(attacker: Character, dmg: number, dir: CANNON.Vec3, force: number, body: CANNON.Body, point?: CANNON.Vec3, kind?: HitKind) {
+    // team matches: no friendly fire, no matter which attack slipped through
+    if (attacker !== this && this.team >= 0 && attacker.team === this.team) return;
     this.cancelWeaponContest();
     if (this.accKind === "helmet" && body === this.head) {
       dmg *= 0.7;
@@ -2439,6 +2451,14 @@ export class Character {
     const hp = this.head.position;
     this.nameTag.position.set(hp.x, hp.y + this.headTop + 0.23 + (this.accKind === "helmet" ? 0.1 : this.accKind.startsWith("cap") ? 0.07 : 0), hp.z);
     this.nameTag.visible = this.alive;
+    if (this.teamRing) {
+      const tp = this.torso.position;
+      const onDeck = this.groundDist < 2.5;
+      this.teamRing.visible = this.alive && onDeck;
+      if (this.teamRing.visible) {
+        this.teamRing.position.set(tp.x, tp.y - this.groundDist + 0.02 + Math.sin(this.time * 3) * 0.005, tp.z);
+      }
+    }
     if (this.stars.visible) {
       this.stars.position.set(hp.x, hp.y + this.headTop, hp.z);
       this.stars.children.forEach((s, i) => {
@@ -2459,6 +2479,22 @@ export class Character {
     this.removed = true;
     this.root.visible = false;
   }
+}
+
+function makeTeamRing(team: number) {
+  if (team < 0) return null;
+  const geo = new THREE.RingGeometry(0.34, 0.5, 40);
+  const mat = new THREE.MeshBasicMaterial({
+    color: team === 0 ? 0xe8343c : 0x2f6fe0,
+    transparent: true,
+    opacity: 0.62,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+  });
+  const ring = new THREE.Mesh(geo, mat);
+  ring.rotation.x = -Math.PI / 2;
+  ring.renderOrder = 4;
+  return ring;
 }
 
 function makeNameTag(text: string, human: boolean, slot: number) {

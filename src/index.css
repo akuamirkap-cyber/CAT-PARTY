@@ -435,6 +435,9 @@ body,
 .ml-back kbd { font-family: "Nunito", sans-serif; font-size: 10px; font-weight: 900; color: rgba(59,42,26,.45); }
 .ml-back:hover { transform: translateX(-2px); }
 .ml-mode.is-bomb { background: linear-gradient(160deg, #ffd166, #ff9d00); color: #4a2c00; }
+.ml-mode.is-team { background: linear-gradient(160deg, #ff8a8a 50%, #8ab4ff 50%); color: #26225a; }
+.mm-mode.is-on.mm-mode-team, .mm-mode.mm-mode-team.is-on { background: linear-gradient(160deg, #ff7d7d 50%, #7da8ff 50%); color: #26225a; box-shadow: 0 4px 0 #5f6ec9, 0 8px 16px rgba(70,90,190,.3); }
+.mm-mode.mm-mode-team.is-on span small { color: rgba(38,34,90,.72); }
 .ml-count { font-family: "Nunito", sans-serif; font-size: 11px; font-weight: 900; letter-spacing: .12em; color: rgba(59,42,26,.6); }
 
 .ml-timer { position: absolute; top: 0; left: 50%; transform: translateX(-50%); display: flex; align-items: center; gap: 13px; padding: 10px 20px 12px; border-radius: 0 0 26px 26px; background: #fff8ec; box-shadow: 0 8px 0 rgba(150,80,0,.22), 0 14px 28px rgba(120,60,0,.25); z-index: 6; }

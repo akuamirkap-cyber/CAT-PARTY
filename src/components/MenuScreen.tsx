@@ -13,14 +13,14 @@ interface Props {
   accessory: AccessoryId;
   eyeStyle: EyeStyleId;
   expression: ExpressionId;
-  mode: "brawl" | "bomb";
+  mode: "brawl" | "bomb" | "teams";
   bots: number;
   twoPlayer: boolean;
   /** False while a sheet/modal is open: pauses the 3D preview and the hotkeys. */
   active: boolean;
   onPlay: () => void;
   onOpenSheet: (sheet: MenuSheet) => void;
-  onMode: (mode: "brawl" | "bomb") => void;
+  onMode: (mode: "brawl" | "bomb" | "teams") => void;
   onBots: (bots: number) => void;
   onTwoPlayer: (on: boolean) => void;
   onSelectAnimal: (step: number) => void;
@@ -100,8 +100,8 @@ export default function MenuScreen(props: Props) {
             </span>
           </div>
           <div className="mm-chip mm-chip-paw"><span>🐾</span>2.450</div>
-          <button type="button" className="mm-mode-chip" onClick={(e) => { uiBtn(e); onMode(mode === "brawl" ? "bomb" : "brawl"); }} aria-label="Ganti mode">
-            {mode === "brawl" ? "⚔️ BRAWL" : "💣 BOM"}
+          <button type="button" className="mm-mode-chip" onClick={(e) => { uiBtn(e); onMode(mode === "brawl" ? "bomb" : mode === "bomb" ? "teams" : "brawl"); }} aria-label="Ganti mode">
+            {mode === "brawl" ? "⚔️ BRAWL" : mode === "bomb" ? "💣 BOM" : "🚩 TIM 5V5"}
           </button>
           <button type="button" className="mm-icon" aria-label="Cara main" onClick={(e) => { uiBtn(e); onOpenSheet("info"); }}><CircleHelp size={20} /></button>
           <button type="button" className="mm-icon" aria-label="Setelan" onClick={(e) => { uiBtn(e); onOpenSheet("settings"); }}><Settings2 size={20} /></button>
@@ -153,6 +153,10 @@ export default function MenuScreen(props: Props) {
           <button type="button" className={`mm-mode mm-mode-bomb ${mode === "bomb" ? "is-on" : ""}`} onClick={(e) => { uiBtn(e); onMode("bomb"); }}>
             <Bomb size={19} />
             <span><b>Lempar Bom</b><small>Angkat & lempar!</small></span>
+          </button>
+          <button type="button" className={`mm-mode mm-mode-team ${mode === "teams" ? "is-on" : ""}`} onClick={(e) => { uiBtn(e); onMode("teams"); }}>
+            <UsersRound size={19} />
+            <span><b>Tim 5v5</b><small>MERAH 🆚 BIRU, tanpa tembak kawan</small></span>
           </button>
         </div>
 

@@ -31,7 +31,8 @@ export default function App() {
   const [acc2, setAcc2] = useState<AccessoryId>("capNewBlue");
   const [twoPlayer, setTwoPlayer] = useState(false);
   const [bots, setBots] = useState(5);
-  const [mode, setMode] = useState<"brawl" | "bomb">("brawl");
+  const [mode, setMode] = useState<"brawl" | "bomb" | "teams">("brawl");
+  const matchBots = mode === "teams" ? (twoPlayer ? 8 : 9) : bots;
   const [camMode, setCamMode] = useState<"stumble" | "gang">(() => (localStorage.getItem("mb.camMode") === "stumble" ? "stumble" : "gang"));
   const [camZoom, setCamZoom] = useState<number>(() => {
     const z = parseFloat(localStorage.getItem("mb.camZoom") ?? "1");
@@ -108,7 +109,7 @@ export default function App() {
         <ErrorBoundary key="arena" label="arena" onReset={() => go("menu")}>
         <GameView
           key={gameKey}
-          options={{ p1Animal: p1, p2Animal: p2, twoPlayer, bots, p1Acc: acc1, p2Acc: acc2, p1Eyes: eyes, p1Expression: expression, mode, camMode, camZoom }}
+          options={{ p1Animal: p1, p2Animal: p2, twoPlayer, bots: matchBots, p1Acc: acc1, p2Acc: acc2, p1Eyes: eyes, p1Expression: expression, mode, camMode, camZoom }}
           showTouch={showTouch && !twoPlayer}
           onExit={() => go("menu")}
         />
@@ -118,7 +119,7 @@ export default function App() {
         <MatchLobby
           you={{ animal: p1, accessory: acc1, eyeStyle: eyes, expression }}
           friend={twoPlayer ? { animal: p2, accessory: acc2 } : null}
-          bots={bots}
+          bots={matchBots}
           mode={mode}
           onChangeAnimal={(step) => setP1((cur) => {
             const i = ANIMALS.findIndex((a) => a.id === cur);
@@ -138,7 +139,7 @@ export default function App() {
             eyeStyle={eyes}
             expression={expression}
             mode={mode}
-            bots={bots}
+            bots={matchBots}
             twoPlayer={twoPlayer}
             active={sheet === null}
             onPlay={start}
@@ -282,7 +283,7 @@ export default function App() {
             <div className="flex items-center justify-between rounded-2xl bg-white p-3 shadow-[0_3px_0_rgba(0,0,0,.1)]">
               <div>
                 <div className="text-sm font-black text-[#24364f]">🤖 Jumlah Bot</div>
-                <div className="text-[11px] font-bold text-slate-500">Lawan komputer di arena</div>
+                <div className="text-[11px] font-bold text-slate-500">{mode === "teams" ? "Mode 5v5: tim dibagi otomatis 5 lawan 5" : "Lawan komputer di arena"}</div>
               </div>
               <div className="flex items-center gap-2">
                 <button onClick={(e) => { uiBtn(e); setBots(Math.max(1, bots - 1)); }} className="press grid h-9 w-9 place-items-center rounded-xl bg-[#ffe9c4] text-lg font-black text-[#7a4a06] shadow-[0_3px_0_#e8b96a]">−</button>

@@ -268,7 +268,7 @@ interface Props {
   you: { animal: AnimalId; accessory: AccessoryId; eyeStyle: EyeStyleId; expression: ExpressionId };
   friend: { animal: AnimalId; accessory: AccessoryId } | null;
   bots: number;
-  mode: "brawl" | "bomb";
+  mode: "brawl" | "bomb" | "teams";
   onChangeAnimal: (step: number) => void;
   onPickAnimal: (id: AnimalId) => void;
   onWardrobe: () => void;
@@ -345,7 +345,7 @@ export default function MatchLobby({ you, friend, bots, mode, onChangeAnimal, on
         <button type="button" className="ml-back" onClick={onCancel}>
           <span>‹</span> BATAL <kbd>ESC</kbd>
         </button>
-        <span className={`ml-mode ${mode === "bomb" ? "is-bomb" : ""}`}>{mode === "bomb" ? "💣 LEMPAR BOM" : "⚔️ BRAWL"}</span>
+        <span className={`ml-mode ${mode === "bomb" ? "is-bomb" : mode === "teams" ? "is-team" : ""}`}>{mode === "bomb" ? "💣 LEMPAR BOM" : mode === "teams" ? "🚩 TIM 5V5" : "⚔️ BRAWL"}</span>
         <div className="ml-top-right">
           <button type="button" className="ml-wardrobe" onClick={onWardrobe}>👕 AKSESORIS</button>
           <span className="ml-count">{roster.length} KUCING</span>
