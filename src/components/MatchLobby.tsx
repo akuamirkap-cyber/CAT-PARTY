@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { ACCESSORIES, ANIMALS, animalById, type AccessoryId, type AnimalId } from "../game/animals";
+import { flagEmoji, pickFlags } from "../game/flags";
 import { poseStatic } from "../game/characterMesh";
 import { createRenderer } from "./webgl";
 import { addLobbyLights, buildLobbyScenery, disposeLobbyActor, frameLobbyCamera, lobbySpacing, makeLobbyActor, type LobbyActor } from "./lobbyStage";
@@ -11,6 +12,7 @@ import type { EyeStyleId, ExpressionId } from "../game/eyes";
 export interface LobbyMember {
   id: string;
   name: string;
+  flag: string;
   animal: AnimalId;
   accessory: AccessoryId;
   eyeStyle?: EyeStyleId;
@@ -30,6 +32,7 @@ export function buildRoster(opts: {
   friend?: { animal: AnimalId; accessory: AccessoryId } | null;
   bots: number;
 }): LobbyMember[] {
+  const flags = pickFlags(32);
   const used = new Set<AnimalId>([opts.you.animal]);
   if (opts.friend) used.add(opts.friend.animal);
   const pool = ANIMALS.map((a) => a.id).filter((id) => !used.has(id));
@@ -37,7 +40,7 @@ export function buildRoster(opts: {
   for (let i = 0; i < opts.bots; i++) {
     const animal = pool[i % pool.length] ?? ANIMALS[i % ANIMALS.length].id;
     const accessory = ACCESSORIES[1 + ((i * 5) % Math.max(1, ACCESSORIES.length - 1))].id;
-    crowded.push({ id: `bot-${i}`, name: BOT_NAMES[i % BOT_NAMES.length], animal, accessory });
+    crowded.push({ id: `bot-${i}`, name: BOT_NAMES[i % BOT_NAMES.length], animal, accessory, flag: flags[i % flags.length] });
   }
   const you: LobbyMember = {
     id: "you",
@@ -47,11 +50,12 @@ export function buildRoster(opts: {
     eyeStyle: opts.you.eyeStyle,
     expression: opts.you.expression,
     you: true,
+    flag: "id",
   };
   // You always stand in the middle of the row, your couch buddy right beside you.
   const pair: LobbyMember[] = [];
   if (opts.friend) {
-    pair.push({ id: "p2", name: "P2", animal: opts.friend.animal, accessory: opts.friend.accessory, friend: true });
+    pair.push({ id: "p2", name: "P2", animal: opts.friend.animal, accessory: opts.friend.accessory, friend: true, flag: flags[1] });
   }
   pair.push(you);
   const start = Math.floor((crowded.length + pair.length - pair.length) / 2);
@@ -253,7 +257,7 @@ function LobbyStage({ roster, ready, paused }: StageProps) {
             }}
             className={`ml-tag ${member.you ? "is-you" : ""} ${member.friend ? "is-friend" : ""} ${ready[i] ? "is-ready" : ""}`}
           >
-            <b>{member.name}</b>
+            <b>{member.name}<span className="ml-flag">{flagEmoji(member.flag)}</span></b>
             <span>{ready[i] ? "SIAP" : "MENUNGGU"}</span>
           </div>
         ))}

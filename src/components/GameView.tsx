@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { flagEmoji } from "../game/flags";
 import { Game, createRoster, type GameOptions, type HudState } from "../game/Game";
 import TouchControls from "./TouchControls";
 import { initAudio } from "../game/audio";
@@ -358,7 +359,7 @@ export default function GameView({ options, showTouch, onExit }: Props) {
                         <span className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg text-xl" style={{ background: p.color }}>
                           <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} />
                         </span>
-                        <span className="flex-1 text-left text-sm font-bold text-slate-700">{p.slot === 1 ? "KAMU" : p.name}{hud.teamMode && p.team >= 0 ? (p.team === 0 ? " 🟥" : " 🟦") : ""}</span>
+                        <span className="flex-1 text-left text-sm font-bold text-slate-700">{p.slot === 1 ? "KAMU" : p.name} {flagEmoji(p.flag)}{hud.teamMode && p.team >= 0 ? (p.team === 0 ? " 🟥" : " 🟦") : ""}</span>
                         <span className="text-sm font-black text-amber-600">{hud.teamMode ? (p.alive ? "✅" : "💀") : `🏆 ${p.wins}`}</span>
                       </div>
                     ))}

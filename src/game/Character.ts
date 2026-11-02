@@ -11,6 +11,7 @@ import { ARM_BOW_TWIST, bowTarget, stabilizeArmRotation } from "./armMotion";
 import { PUNCH_DURATION, PUNCH_WINDUP, punchPose } from "./punchMotion";
 import { POUNCE_DURATION, pouncePose } from "./pounceMotion";
 import { SWING_DURATION, SWING_STRIKE_END, SWING_WINDUP, segmentDistanceSquared, sweptSegmentDistanceSquared, weaponSwingPose } from "./weaponMotion";
+import { drawFlag } from "./flags";
 
 export const GRAVITY = 22;
 const WALK_SPEED = 4.0;
@@ -199,6 +200,8 @@ export class Character {
   lives = -1;
   /** countdown while waiting to respawn (teams mode); <= 0 = not waiting */
   respawnT = 0;
+  /** country code shown on the name tag */
+  flag = "id";
   world: CANNON.World;
   hooks: CharacterHooks;
 
@@ -340,7 +343,8 @@ export class Character {
     accessory: AccessoryId = "none",
     eyeStyle: EyeStyleId = "default",
     expression: ExpressionId = "default",
-    team: number = -1
+    team: number = -1,
+    flag = "id"
   ) {
     this.world = world;
     this.index = index;
@@ -350,6 +354,7 @@ export class Character {
     this.humanSlot = humanSlot;
     this.isHuman = humanSlot > 0;
     this.team = team;
+    this.flag = flag;
     this.hooks = hooks;
     this.facing = yaw;
     this.input = input;
@@ -391,7 +396,7 @@ export class Character {
     this.accKind = this.visual.accessoryKind;
     this.root.add(...this.visual.all);
 
-    this.nameTag = makeNameTag(this.isHuman ? (humanSlot === 1 ? "KAMU" : "P2") : name, this.isHuman, humanSlot, team);
+    this.nameTag = makeNameTag(this.isHuman ? (humanSlot === 1 ? "KAMU" : "P2") : name, this.isHuman, humanSlot, team, flag);
     this.root.add(this.nameTag);
 
     // team ring painted on the deck under the cat (team matches only)
@@ -2570,26 +2575,39 @@ function makeTeamRing(team: number) {
   return ring;
 }
 
-function makeNameTag(text: string, human: boolean, slot: number, team = -1) {
+function makeNameTag(text: string, human: boolean, slot: number, team = -1, flag = "id") {
+  const W = 352;
   const c = document.createElement("canvas");
-  c.width = 256;
+  c.width = W;
   c.height = 64;
   const g = c.getContext("2d")!;
   g.font = "bold 30px system-ui, sans-serif";
-  g.textAlign = "center";
   g.textBaseline = "middle";
+  const tw = g.measureText(text).width;
+  const FLAG_W = 36;
+  const FLAG_H = 25;
+  const gap = 9;
+  const total = tw + gap + FLAG_W;
+  const startX = (W - total) / 2;
+  // name
+  g.textAlign = "left";
   g.lineWidth = 6;
   g.strokeStyle = "rgba(0,0,0,0.55)";
-  g.strokeText(text, 128, 34);
+  g.strokeText(text, startX, 34);
   // team matches dye the name so you can tell friend from foe at a glance
   g.fillStyle = human
     ? slot === 1 ? "#ffd23f" : "#6ee7ff"
     : team < 0 ? "#ffffff" : team === 0 ? "#ff9c9c" : "#93c2ff";
-  g.fillText(text, 128, 34);
+  g.fillText(text, startX, 34);
+  // country flag right of the name
+  drawFlag(g, flag, startX + tw + gap, 34 - FLAG_H / 2, FLAG_W, FLAG_H);
+  g.strokeStyle = "rgba(255,255,255,0.85)";
+  g.lineWidth = 2;
+  g.strokeRect(startX + tw + gap + 1, 34 - FLAG_H / 2 + 1, FLAG_W - 2, FLAG_H - 2);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
   const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthTest: false, transparent: true }));
-  sp.scale.set(1.6, 0.4, 1);
+  sp.scale.set(2.2, 0.4, 1);
   sp.renderOrder = 10;
   return sp;
 }

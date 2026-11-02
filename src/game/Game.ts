@@ -9,6 +9,7 @@ import { attachInput, detachInput, emptyControl, endFrameInput, readControls, ty
 import { sfx } from "./audio";
 import * as rig from "./rig";
 import { getTuning } from "./tuning";
+import { flagEmoji, pickFlags } from "./flags";
 import { qualityPixelRatio } from "./quality";
 import type { EyeStyleId, ExpressionId } from "./eyes";
 import { disposeCharacterDetails } from "./characterMesh";
@@ -46,6 +47,7 @@ export interface HudPlayer {
   wins: number;
   team: number;
   lives: number;
+  flag: string;
 }
 
 export interface HudState {
@@ -82,6 +84,7 @@ export interface RosterEntry {
   slot: 0 | 1 | 2;
   wins: number;
   team: number;
+  flag: string;
 }
 
 interface Brain {
@@ -127,12 +130,16 @@ export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "
     counts[t]++;
     return t;
   };
+  const flags = pickFlags(32).filter((f) => f !== "id"); // Indonesia is yours
+  let flagIdx = 0;
+  const nextFlag = () => flags[flagIdx++ % flags.length];
   const roster: RosterEntry[] = [{
     def: animalById(opts.p1Animal), name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc,
     eyeStyle: opts.p1Eyes ?? "default", expression: opts.p1Expression ?? "default", team: teams ? pickTeam() : -1,
+    flag: "id", // kamu selalu tampil dengan bendera Indonesia
   }];
   if (opts.twoPlayer) {
-    roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: "default", expression: "default", team: teams ? 1 : -1 });
+    roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: "default", expression: "default", team: teams ? 1 : -1, flag: nextFlag() });
     if (teams) counts[1]++;
   }
   const used = new Set<AnimalId>(roster.map(r => r.def.id));
@@ -143,7 +150,7 @@ export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "
     const def = pool[Math.floor(Math.random() * pool.length)];
     used.add(def.id);
     const acc: AccessoryId = Math.random() < 0.7 ? ACCESSORIES[1 + Math.floor(Math.random() * (ACCESSORIES.length - 1))].id : "none";
-    roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: "default", expression: "default", team: teams ? pickTeam() : -1 });
+    roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: "default", expression: "default", team: teams ? pickTeam() : -1, flag: nextFlag() });
   }
   return roster;
 }
@@ -477,7 +484,7 @@ export class Game {
       }
       pos.y = this.arena!.surfaceHeight(pos.z) + 0.05;
       const yaw = Math.atan2(-pos.x, -pos.z);
-      const c = new Character(this.world, i, r.def, r.name, r.slot, this.hooks, pos, yaw, emptyControl(), r.acc, r.eyeStyle, r.expression, r.team);
+      const c = new Character(this.world, i, r.def, r.name, r.slot, this.hooks, pos, yaw, emptyControl(), r.acc, r.eyeStyle, r.expression, r.team, r.flag);
       c.wins = r.wins;
       if (this.opts.mode === "teams") c.lives = TEAM_LIVES;
       this.scene.add(c.root);
@@ -1366,12 +1373,13 @@ export class Game {
         const killer = c.lastHitBy && c.time - c.lastHitAt < 7 && c.lastHitBy !== c ? c.lastHitBy : null;
         const byBomb = this.opts.mode === "bomb" && c.lastHitKind === "bomb";
         const tag = (x: Character) => (this.opts.mode === "teams" ? `${x.team === 0 ? "🟥" : "🟦"} ` : "");
+        const fl = (x: Character) => flagEmoji(x.flag);
         this.pushFeed(
           killer
             ? byBomb
-              ? `💥 ${tag(killer)}${killer.name} meledakkan ${tag(c)}${c.def.emoji} ${c.name} keluar!`
-              : `${tag(killer)}${killer.def.emoji} ${killer.name} melempar ${tag(c)}${c.def.emoji} ${c.name} keluar!`
-            : `${tag(c)}${c.def.emoji} ${c.name} jatuh sendiri 🤦`
+              ? `💥 ${tag(killer)}${killer.name}${fl(killer)} meledakkan ${tag(c)}${c.def.emoji} ${c.name}${fl(c)} keluar!`
+              : `${tag(killer)}${killer.def.emoji} ${killer.name}${fl(killer)} melempar ${tag(c)}${c.def.emoji} ${c.name}${fl(c)} keluar!`
+            : `${tag(c)}${c.def.emoji} ${c.name}${fl(c)} jatuh sendiri 🤦`
         );
         const outOfLives = this.opts.mode !== "teams" || c.team < 0 || c.lives <= 0;
         if (!outOfLives) {
@@ -1379,10 +1387,10 @@ export class Game {
           if (c.lives > 0) {
             c.parkForRespawn();
             c.respawnT = 2.8;
-            this.pushFeed(`↩️ ${tag(c)}${c.name} balik lagi! (sisa ${c.lives} nyawa)`);
+            this.pushFeed(`↩️ ${tag(c)}${c.name}${flagEmoji(c.flag)} balik lagi! (sisa ${c.lives} nyawa)`);
             if (c.isHuman) this.setBanner(`KAMU GUGUR! SISA ${c.lives} NYAWA`);
           } else {
-            this.pushFeed(`☠️ ${tag(c)}${c.name} habis nyawanya!`);
+            this.pushFeed(`☠️ ${tag(c)}${c.name}${flagEmoji(c.flag)} habis nyawanya!`);
             if (c.isHuman) this.setBanner(c.humanSlot === 1 ? "KAMU TERSINGKIR!" : "P2 TERSINGKIR!");
           }
         } else if (c.isHuman) this.setBanner(c.humanSlot === 1 ? "KAMU TERSINGKIR!" : "P2 TERSINGKIR!");
@@ -1569,6 +1577,7 @@ export class Game {
         wins: c.wins,
         team: c.team,
         lives: c.lives,
+        flag: c.flag,
       })),
       feed: this.feed.map((f) => ({ id: f.id, text: f.text })),
       banner: this.banner?.text ?? null,
