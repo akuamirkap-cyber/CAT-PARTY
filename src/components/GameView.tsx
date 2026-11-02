@@ -186,53 +186,47 @@ export default function GameView({ options, showTouch, onExit }: Props) {
             </div>
           )}
 
-          {/* stock bar — Digimon-style card strip for EVERY cat, in all modes */}
+          {/* stock bar — dense Digimon-style strip; team panels make red vs blue obvious */}
           <div className="absolute inset-x-0 bottom-0">
             <div
-              className="flex items-end justify-center gap-1 border-t-[3px] px-2 py-1.5"
+              className="stock-strip"
               style={{
-                background: "linear-gradient(180deg, #ffb347 0%, #ff9d2e 45%, #f07f1f 100%)",
-                borderTopColor: "#ffd9a0",
+                background: "linear-gradient(180deg, #ffb347 0%, #ff9d2e 46%, #ef7d1d 100%)",
+                borderTop: "3px solid #ffd9a0",
                 boxShadow: "0 -4px 14px rgba(180,80,0,.35)",
               }}
             >
-              {[...hud.players]
-                .sort((a, b) => (hud.teamMode ? a.team - b.team || a.slot - b.slot || a.id - b.id : a.slot - b.slot || a.id - b.id))
-                .map((p) => {
-                  const you = p.slot === 1;
-                  const mate = p.slot === 2;
-                  const ringColor = hud.teamMode ? (p.team === 0 ? "#e8343c" : "#2f6fe0") : you ? "#ffb400" : mate ? "#22b1e8" : "#f3f4f6";
-                  const dead = !p.alive && p.lives <= 0;
-                  const respawning = !p.alive && p.lives > 0;
-                  const num = hud.teamMode ? (p.lives > 0 ? p.lives : 0) : p.wins;
-                  return (
-                    <div key={p.id} className={`stock-card ${you ? "is-you" : ""} ${dead ? "is-dead" : ""} ${showTouch ? "is-compact" : ""}`}>
-                      {you && <span className="stock-you-tag">KAMU</span>}
-                      {mate && <span className="stock-you-tag stock-p2-tag">P2</span>}
-                      <span
-                        className="stock-ring"
-                        style={{ borderColor: ringColor, background: p.color }}
-                      >
-                        {p.alive ? <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} /> : "💀"}
-                        {p.ko && <span className="stock-ko">💫</span>}
-                        <span className="stock-flag">{flagEmoji(p.flag)}</span>
-                      </span>
-                      <span className="stock-side">
-                        <span className="stock-plate" style={{ borderTopColor: ringColor }}>
-                          <b className="stock-num">
-                            {respawning ? (you ? `↩${Math.ceil(hud.respawnIn ?? 1)}` : "↩") : dead ? "✕" : num}
-                          </b>
-                        </span>
-                        <span className="stock-dizzy">
-                          <i
-                            className={p.ko ? "bg-purple-500" : p.dizzy > 65 ? "bg-red-500" : "bg-sky-300"}
-                            style={{ width: `${p.ko ? 100 : Math.min(100, p.dizzy)}%` }}
-                          />
-                        </span>
-                      </span>
+              {hud.teamMode
+                ? [0, 1].map((team) => (
+                    <div key={team} className={`stock-panel ${team === 0 ? "is-red" : "is-blue"}`}>
+                      <span className="stock-panel-tag">{team === 0 ? "🟥 TIM MERAH" : "🟦 TIM BIRU"}</span>
+                      <div className="stock-row">
+                        {hud.players
+                          .filter((p) => p.team === team)
+                          .sort((a, b) => a.slot - b.slot || a.id - b.id)
+                          .map((p) => (
+                            <StockCard key={p.id} p={p} ring={team === 0 ? "#e8343c" : "#2f6fe0"} hud={hud} showTouch={showTouch} />
+                          ))}
+                      </div>
                     </div>
-                  );
-                })}
+                  ))
+                : (
+                    <div className="stock-panel is-neutral">
+                      <div className="stock-row">
+                        {[...hud.players]
+                          .sort((a, b) => a.slot - b.slot || a.id - b.id)
+                          .map((p) => (
+                            <StockCard
+                              key={p.id}
+                              p={p}
+                              ring={p.slot === 1 ? "#ffb400" : p.slot === 2 ? "#22b1e8" : "#f3f4f6"}
+                              hud={hud}
+                              showTouch={showTouch}
+                            />
+                          ))}
+                      </div>
+                    </div>
+                  )}
             </div>
           </div>
 
@@ -356,6 +350,33 @@ export default function GameView({ options, showTouch, onExit }: Props) {
       )}
 
       {showTouch && hud?.phase !== "roundEnd" && <TouchControls />}
+    </div>
+  );
+}
+
+function StockCard({ p, ring, hud, showTouch }: { p: HudState["players"][number]; ring: string; hud: HudState; showTouch: boolean }) {
+  const you = p.slot === 1;
+  const mate = p.slot === 2;
+  const dead = !p.alive && p.lives <= 0;
+  const respawning = !p.alive && p.lives > 0;
+  const num = hud.teamMode ? (p.lives > 0 ? p.lives : 0) : p.wins;
+  return (
+    <div className={`stock-card ${you ? "is-you" : ""} ${dead ? "is-dead" : ""} ${showTouch ? "is-compact" : ""}`}>
+      {you && <span className="stock-you-tag">KAMU</span>}
+      {mate && <span className="stock-you-tag stock-p2-tag">P2</span>}
+      <span className="stock-ring" style={{ borderColor: ring, background: p.color }}>
+        {p.alive ? <Portrait id={p.animal} fallback={p.emoji} eyeStyle={p.eyeStyle} expression={p.expression} /> : "💀"}
+        {p.ko && <span className="stock-ko">💫</span>}
+        <span className="stock-flag">{flagEmoji(p.flag)}</span>
+      </span>
+      <span className="stock-side">
+        <span className="stock-plate" style={{ borderTopColor: ring }}>
+          <b className="stock-num">{respawning ? (you ? `↩${Math.ceil(hud.respawnIn ?? 1)}` : "↩") : dead ? "✕" : num}</b>
+        </span>
+        <span className="stock-dizzy">
+          <i className={p.ko ? "bg-purple-500" : p.dizzy > 65 ? "bg-red-500" : "bg-sky-300"} style={{ width: `${p.ko ? 100 : Math.min(100, p.dizzy)}%` }} />
+        </span>
+      </span>
     </div>
   );
 }
