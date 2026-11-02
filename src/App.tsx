@@ -420,6 +420,26 @@ function AccessoryIcon({ id, size = 20 }: { id: AccessoryId; size?: number }) {
       </Svg>
     );
   }
+  if (id === "crown") {
+    return (
+      <Svg size={size}>
+        <path d="M4 17 3 8l5 3 4-5 4 5 5-3-1 9Z" fill="#ffc53d" stroke="#8a5b00" strokeWidth="1.8" strokeLinejoin="round" />
+        <circle cx="12" cy="13.5" r="1.6" fill="#e23a5a" stroke="#8a1430" strokeWidth="1" />
+        <path d="M4 18.5h16" stroke="#8a5b00" strokeWidth="1.8" strokeLinecap="round" />
+      </Svg>
+    );
+  }
+  if (id === "shades") {
+    return (
+      <Svg size={size}>
+        <path d="M3 9h18" stroke="#16141a" strokeWidth="2.4" strokeLinecap="round" />
+        <rect x="4.2" y="9" width="6.8" height="5.6" rx="2.4" fill="#16141a" stroke="#000" strokeWidth="1" />
+        <rect x="13" y="9" width="6.8" height="5.6" rx="2.4" fill="#16141a" stroke="#000" strokeWidth="1" />
+        <path d="M6.2 10.6c1.4-.8 2.6-.8 3.4 0" stroke="#9fb4c8" strokeWidth="1.2" strokeLinecap="round" />
+        <path d="M15 10.6c1.4-.8 2.6-.8 3.4 0" stroke="#9fb4c8" strokeWidth="1.2" strokeLinecap="round" />
+      </Svg>
+    );
+  }
   if (id === "dolit") {
     return (
       <Svg size={size}>

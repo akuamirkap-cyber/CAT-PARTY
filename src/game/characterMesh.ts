@@ -2794,6 +2794,92 @@ function makeHelmet(color: number, hs: Shape[]): AccessoryBuild {
   return { group: shadowed(g), torsoGroup: null, googly: [], detachable: false };
 }
 
+/** The royal crown from the reference slides: gold band, six spikes, jewel balls. */
+function makeCrown(hs: Shape[]): AccessoryBuild {
+  const g = new THREE.Group();
+  const body = hs.filter((s) => s.t === 0 && !s.noBounds);
+  const gold = accMat(0xffc53d, 0.3, { clearcoat: 0.6, metalness: 0.45 });
+  const goldDark = accMat(0xd9a016, 0.4, { metalness: 0.4 });
+  const ruby = accMat(0xe23a5a, 0.2, { clearcoat: 1 });
+  // fit the band around the top of the head like makeHelmet fits its shell
+  const mn = new THREE.Vector3(1e9, 1e9, 1e9), mx = new THREE.Vector3(-1e9, -1e9, -1e9);
+  for (const sh of body) {
+    mn.min(new THREE.Vector3(sh.c[0] - sh.r[0], sh.c[1] - sh.r[1], sh.c[2] - sh.r[2]));
+    mx.max(new THREE.Vector3(sh.c[0] + sh.r[0], sh.c[1] + sh.r[1], sh.c[2] + sh.r[2]));
+  }
+  const C = toLocal(new THREE.Vector3((mn.x + mx.x) / 2, mx.y + 0.005 * HS, (mn.z + mx.z) / 2 - 0.01 * HS));
+  const R = Math.max(0.34 * HS, ((mx.x - mn.x) / 2) * 1.02);
+  const H = 0.2 * HS;
+  // band: low cylinder that follows the skull curve (slightly domed bottom)
+  const bandPts: THREE.Vector3[] = [];
+  for (let i = 0; i < 40; i++) {
+    const a = (i / 40) * Math.PI * 2;
+    bandPts.push(new THREE.Vector3(C.x + Math.sin(a) * R, C.y + 0.02 * HS, C.z + Math.cos(a) * R));
+  }
+  const curve = new THREE.CatmullRomCurve3(bandPts, true);
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 96, 0.035 * HS, 10, true), gold));
+  // shell under the band so the crown reads solid from the side
+  const shell = new THREE.Mesh(
+    new THREE.CylinderGeometry(R * 1.005, R * 1.02, H * 0.75, 40, 1, true),
+    accMat(0xffc53d, 0.32, { clearcoat: 0.5, metalness: 0.35, side: THREE.DoubleSide }),
+  );
+  shell.position.set(C.x, C.y + H * 0.3, C.z);
+  g.add(shell);
+  // six spikes with jewel balls, alternating heights
+  for (let i = 0; i < 6; i++) {
+    const a = (i / 6) * Math.PI * 2 + Math.PI / 6;
+    const h = H * (i % 2 === 0 ? 1 : 0.72);
+    const px = C.x + Math.sin(a) * R * 0.98;
+    const pz = C.z + Math.cos(a) * R * 0.98;
+    const tip = new THREE.Vector3(px, C.y + H * 0.72 + h, pz);
+    const base = new THREE.Vector3(px, C.y + H * 0.6, pz);
+    g.add(coneAB(base, tip, 0.055 * HS, goldDark, 1, 0.02 * HS));
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(0.045 * HS, 12, 10), i === 0 ? ruby : gold);
+    ball.position.copy(tip).addScaledVector(tip.clone().sub(base).normalize(), 0.02 * HS);
+    g.add(ball);
+  }
+  // front jewel on the band
+  const front = new THREE.Mesh(new THREE.SphereGeometry(0.05 * HS, 14, 12), ruby);
+  front.position.set(C.x, C.y + 0.03 * HS, C.z + R * 1.0);
+  front.scale.set(1, 1.25, 0.6);
+  g.add(front);
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+
+/** The shades from the reference slides: dark glossy lenses, thin bridge, temple arms. */
+function makeShades(hs: Shape[]): AccessoryBuild {
+  const g = new THREE.Group();
+  const black = accMat(0x16141a, 0.18, { clearcoat: 1 });
+  const ex = EYE.x * TU.eyeX, ey = EYE.y + TU.eyeY + 0.015;
+  const r = 0.185 * TU.eyeSize * HS;
+  for (const s of [1, -1]) {
+    const fr = frameAt(hs, s * ex, ey, HS, HO, 0.75);
+    const c = toLocal(fr.P).addScaledVector(fr.D, 0.06 * HS);
+    const lens = new THREE.Mesh(new THREE.SphereGeometry(1, 26, 16), black);
+    lens.scale.set(r * 1.18, r * 0.86, r * 0.32);
+    lens.position.copy(c);
+    lens.lookAt(c.clone().add(fr.D));
+    g.add(lens);
+    // temple arm toward the ear
+    const back = HL(s * 0.5, ey + 0.03, -0.1);
+    const outer = c.clone().add(new THREE.Vector3(s * r * 1.1, 0.02 * HS, -0.02 * HS));
+    g.add(coneAB(outer, back, 0.02 * HS, black, 1, 0.02 * HS));
+  }
+  // bridge across the nose
+  const l0 = new THREE.Vector3(), l1 = new THREE.Vector3();
+  {
+    const fa = frameAt(hs, EYE.x * TU.eyeX, ey, HS, HO, 0.75);
+    const fb = frameAt(hs, -EYE.x * TU.eyeX, ey, HS, HO, 0.75);
+    l0.copy(toLocal(fa.P)).addScaledVector(fa.D, 0.06 * HS);
+    l1.copy(toLocal(fb.P)).addScaledVector(fb.D, 0.06 * HS);
+  }
+  const bridge = new THREE.Mesh(new THREE.CylinderGeometry(0.018 * HS, 0.018 * HS, l0.distanceTo(l1) * 0.72, 8), black);
+  bridge.position.copy(l0).add(l1).multiplyScalar(0.5);
+  bridge.rotation.z = Math.PI / 2;
+  g.add(bridge);
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+
 let SCARF_TORSO: Shape[] = [];
 function buildAccessory(kind: AccessoryId, hs: Shape[], torso: Shape[] = []): AccessoryBuild | null {
   SCARF_TORSO = torso;
@@ -2810,6 +2896,10 @@ function buildAccessory(kind: AccessoryId, hs: Shape[], torso: Shape[] = []): Ac
       return makeDolit(hs);
     case "helmet":
       return makeHelmet(0xffcc2e, hs);
+    case "crown":
+      return makeCrown(hs);
+    case "shades":
+      return makeShades(hs);
     default:
       return null;
   }

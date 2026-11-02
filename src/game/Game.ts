@@ -11,18 +11,13 @@ import * as rig from "./rig";
 import { getTuning } from "./tuning";
 import { flagEmoji, pickFlags } from "./flags";
 import { qualityPixelRatio } from "./quality";
-import type { EyeStyleId, ExpressionId } from "./eyes";
+import { randomFaceCombo, isDefaultFace, type EyeStyleId, type ExpressionId } from "./eyes";
 import { disposeCharacterDetails } from "./characterMesh";
 import { impactEffect, knockoutEffectColor } from "./impactEffects";
 const _ev = new THREE.Vector3();
 
-/** Face combos every bot picks from — no grumpy anywhere, per the player. */
-const BOT_EYE_STYLES: EyeStyleId[] = ["default", "round", "slit", "green", "goofy"];
-const BOT_EXPRESSIONS: ExpressionId[] = ["default", "tongue"];
-const randomFace = () => ({
-  eyeStyle: BOT_EYE_STYLES[Math.floor(Math.random() * BOT_EYE_STYLES.length)],
-  expression: BOT_EXPRESSIONS[Math.floor(Math.random() * BOT_EXPRESSIONS.length)],
-});
+/** Face combos every cat gets — from the existing styles, never grumpy. */
+const randomFace = randomFaceCombo;
 
 export interface GameOptions {
   p1Animal: AnimalId;
@@ -141,13 +136,15 @@ export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "
   const flags = pickFlags(32).filter((f) => f !== "id"); // Indonesia is yours
   let flagIdx = 0;
   const nextFlag = () => flags[flagIdx++ % flags.length];
+  const youFace = isDefaultFace(opts.p1Eyes ?? "default", opts.p1Expression ?? "default") ? randomFace() : { eyeStyle: opts.p1Eyes!, expression: opts.p1Expression! };
   const roster: RosterEntry[] = [{
     def: animalById(opts.p1Animal), name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc,
-    eyeStyle: opts.p1Eyes ?? "default", expression: opts.p1Expression ?? "default", team: teams ? pickTeam() : -1,
+    eyeStyle: youFace.eyeStyle, expression: youFace.expression, team: teams ? pickTeam() : -1,
     flag: "id", // kamu selalu tampil dengan bendera Indonesia
   }];
   if (opts.twoPlayer) {
-    roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: "default", expression: "default", team: teams ? 1 : -1, flag: nextFlag() });
+    const p2Face = randomFace();
+    roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: p2Face.eyeStyle, expression: p2Face.expression, team: teams ? 1 : -1, flag: nextFlag() });
     if (teams) counts[1]++;
   }
   const used = new Set<AnimalId>(roster.map(r => r.def.id));

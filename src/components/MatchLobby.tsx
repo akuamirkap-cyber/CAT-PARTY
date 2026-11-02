@@ -7,7 +7,7 @@ import { createRenderer } from "./webgl";
 import { addLobbyLights, buildLobbyScenery, disposeLobbyActor, frameLobbyCamera, lobbySpacing, makeLobbyActor, type LobbyActor } from "./lobbyStage";
 import { preloadCharacters } from "../game/characterPreload";
 import Portrait from "./Portrait";
-import type { EyeStyleId, ExpressionId } from "../game/eyes";
+import { randomFaceCombo, isDefaultFace, type EyeStyleId, type ExpressionId } from "../game/eyes";
 
 export interface LobbyMember {
   id: string;
@@ -34,8 +34,6 @@ export function buildRoster(opts: {
 }): LobbyMember[] {
   const flags = pickFlags(32);
   // same face pool as the real match bots — no grumpy, cheerful mix only
-  const LOBBY_EYES: EyeStyleId[] = ["default", "round", "slit", "green", "goofy"];
-  const LOBBY_MOUTH: ExpressionId[] = ["default", "tongue"];
   const used = new Set<AnimalId>([opts.you.animal]);
   if (opts.friend) used.add(opts.friend.animal);
   const pool = ANIMALS.map((a) => a.id).filter((id) => !used.has(id));
@@ -49,24 +47,24 @@ export function buildRoster(opts: {
       animal,
       accessory,
       flag: flags[i % flags.length],
-      eyeStyle: LOBBY_EYES[i % LOBBY_EYES.length],
-      expression: LOBBY_MOUTH[i % LOBBY_MOUTH.length],
+      ...randomFaceCombo(),
     });
   }
+  const youStyled = isDefaultFace(opts.you.eyeStyle, opts.you.expression) ? randomFaceCombo() : { eyeStyle: opts.you.eyeStyle, expression: opts.you.expression };
   const you: LobbyMember = {
     id: "you",
     name: "KAMU",
     animal: opts.you.animal,
     accessory: opts.you.accessory,
-    eyeStyle: opts.you.eyeStyle,
-    expression: opts.you.expression,
+    eyeStyle: youStyled.eyeStyle,
+    expression: youStyled.expression,
     you: true,
     flag: "id",
   };
   // You always stand in the middle of the row, your couch buddy right beside you.
   const pair: LobbyMember[] = [];
   if (opts.friend) {
-    pair.push({ id: "p2", name: "P2", animal: opts.friend.animal, accessory: opts.friend.accessory, friend: true, flag: flags[1], eyeStyle: LOBBY_EYES[1], expression: LOBBY_MOUTH[0] });
+    pair.push({ id: "p2", name: "P2", animal: opts.friend.animal, accessory: opts.friend.accessory, friend: true, flag: flags[1], ...randomFaceCombo() });
   }
   pair.push(you);
   const start = Math.floor((crowded.length + pair.length - pair.length) / 2);

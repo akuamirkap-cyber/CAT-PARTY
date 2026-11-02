@@ -15,3 +15,19 @@ export const EXPRESSIONS: { id: ExpressionId; name: string; description: string 
   { id: "grumpy", name: "Cemberut", description: "Raut kesal yang menggemaskan" },
   { id: "tongue", name: "Lidah Usil", description: "Ekspresi ceria dan jahil" },
 ];
+
+/** Eye styles bots and unstyled cats pick from — grumpy stays wardrobe-only. */
+export const FACE_EYES: EyeStyleId[] = ["round", "slit", "green", "goofy"];
+/** Mouth expressions in the bot pool — again, no grumpy. */
+export const FACE_MOUTHS: ExpressionId[] = ["default", "tongue"];
+
+/** A random, always-styled, never-grumpy eye+expression combo. */
+export function randomFaceCombo(rng: () => number = Math.random): { eyeStyle: EyeStyleId; expression: ExpressionId } {
+  return {
+    eyeStyle: FACE_EYES[Math.floor(rng() * FACE_EYES.length)],
+    expression: FACE_MOUTHS[Math.floor(rng() * FACE_MOUTHS.length)],
+  };
+}
+
+/** True when a cat shows no chosen style at all (both slots on "Asli Kucing"). */
+export const isDefaultFace = (eyeStyle: EyeStyleId, expression: ExpressionId) => eyeStyle === "default" && expression === "default";

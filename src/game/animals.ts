@@ -49,11 +49,13 @@ export const BOT_NAMES = [
   "Si Tengil",
 ];
 
-export type AccessoryId = "none" | "capRed" | "capBlue" | "capNewRed" | "capNewBlue" | "dolit" | "helmet";
+export type AccessoryId = "none" | "capRed" | "capBlue" | "capNewRed" | "capNewBlue" | "dolit" | "helmet" | "crown" | "shades";
 export const ACCESSORIES: { id: AccessoryId; name: string; icon: string }[] = [
   { id: "none", name: "Polos", icon: "🚫" },
   { id: "capNewRed", name: "Topi Baseball Merah", icon: "🧢" },
   { id: "capNewBlue", name: "Topi Baseball Biru", icon: "🧢" },
   { id: "dolit", name: "Paman Dolit", icon: "🥸" },
   { id: "helmet", name: "Helm Fullface", icon: "⛑️" },
+  { id: "crown", name: "Mahkota Raja", icon: "👑" },
+  { id: "shades", name: "Kacamata Keren", icon: "🕶️" },
 ];

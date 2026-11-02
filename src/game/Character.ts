@@ -2526,7 +2526,7 @@ export class Character {
       }
     }
     const hp = this.head.position;
-    this.nameTag.position.set(hp.x, hp.y + this.headTop + 0.23 + (this.accKind === "helmet" ? 0.1 : this.accKind.startsWith("cap") ? 0.07 : 0), hp.z);
+    this.nameTag.position.set(hp.x, hp.y + this.headTop + 0.23 + (this.accKind === "helmet" || this.accKind === "crown" ? 0.1 : this.accKind.startsWith("cap") ? 0.07 : 0), hp.z);
     this.nameTag.visible = this.alive;
     if (this.teamRing) {
       const tp = this.torso.position;
