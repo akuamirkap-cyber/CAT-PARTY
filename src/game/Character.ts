@@ -746,7 +746,8 @@ export class Character {
   /** hats & masks fly off on big hits and become loose physics props */
   knockAccessory(dir: CANNON.Vec3) {
     const acc = this.visual.accessory;
-    if (!acc || this.accKind === "helmet" || this.accKind === "none") return;
+    // body-worn accessories (belt, boxers, float, broom, gloves, sandals) keep an empty head group
+    if (!acc || acc.children.length === 0 || this.accKind === "helmet" || this.accKind === "none") return;
     const scene = this.root.parent;
     if (!scene) return;
     this.visual.head.updateMatrixWorld(true);

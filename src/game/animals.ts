@@ -49,7 +49,10 @@ export const BOT_NAMES = [
   "Si Tengil",
 ];
 
-export type AccessoryId = "none" | "capRed" | "capBlue" | "capNewRed" | "capNewBlue" | "dolit" | "helmet" | "crown" | "shades";
+export type AccessoryId =
+  | "none" | "capRed" | "capBlue" | "capNewRed" | "capNewBlue" | "dolit" | "helmet" | "crown" | "shades"
+  | "cowboy" | "afro" | "nerd" | "detective" | "clownnose" | "jason"
+  | "belt" | "boxers" | "duckfloat" | "broom" | "gloves" | "sandal";
 export const ACCESSORIES: { id: AccessoryId; name: string; icon: string }[] = [
   { id: "none", name: "Polos", icon: "🚫" },
   { id: "capNewRed", name: "Topi Baseball Merah", icon: "🧢" },
@@ -58,4 +61,16 @@ export const ACCESSORIES: { id: AccessoryId; name: string; icon: string }[] = [
   { id: "helmet", name: "Helm Fullface", icon: "⛑️" },
   { id: "crown", name: "Mahkota Raja", icon: "👑" },
   { id: "shades", name: "Kacamata Keren", icon: "🕶️" },
+  { id: "cowboy", name: "Topi Koboi", icon: "🤠" },
+  { id: "afro", name: "Afro Pelangi", icon: "🌈" },
+  { id: "nerd", name: "Kacamata Nerds", icon: "🤓" },
+  { id: "detective", name: "Kacamata Detektif", icon: "🕵️" },
+  { id: "clownnose", name: "Hidung Badut", icon: "🤡" },
+  { id: "jason", name: "Topeng Hockey", icon: "🥷" },
+  { id: "belt", name: "Sabuk Juara", icon: "🏅" },
+  { id: "boxers", name: "Celana Tinju", icon: "🩳" },
+  { id: "duckfloat", name: "Pelampung Bebek", icon: "🦆" },
+  { id: "broom", name: "Sapu Punggung", icon: "🧹" },
+  { id: "gloves", name: "Sarung Tinju", icon: "🧤" },
+  { id: "sandal", name: "Sandal Jepit", icon: "🩴" },
 ];

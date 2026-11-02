@@ -1,5 +1,5 @@
 import React from "react";
-import type { AccessoryId } from "../game/animals";
+import { ACCESSORIES, type AccessoryId } from "../game/animals";
 
 export function Svg({ children, size = 20 }: { children: React.ReactNode; size?: number }) {
   return (
@@ -157,6 +157,9 @@ export function AccessoryIcon({ id, size = 20 }: { id: AccessoryId; size?: numbe
       </Svg>
     );
   }
+  // items without a drawn glyph (incl. everything ported from the menu games) use their emoji
+  const meta = ACCESSORIES.find((a) => a.id === id);
+  if (meta) return <span style={{ fontSize: size * 0.82, lineHeight: 1 }}>{meta.icon}</span>;
   return (
     <Svg size={size}>
       <circle cx="12" cy="12" r="8" fill="#eef3fb" stroke="#b9c6db" strokeWidth="1.8" />

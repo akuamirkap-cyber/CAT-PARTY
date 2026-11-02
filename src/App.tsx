@@ -200,7 +200,7 @@ export default function App() {
       )}
 
       {sheet === "acc" && (
-        <Sheet title="Aksesoris Kepala" icon={<HatIcon />} onClose={() => setSheet(null)} footer={<div className="text-center text-[11px] font-bold text-slate-500">Topi & topeng bisa copot kalau kena pukulan tongkat. Helm mengurangi damage kepala.</div>}>
+        <Sheet title="Aksesoris" icon={<HatIcon />} onClose={() => setSheet(null)} footer={<div className="text-center text-[11px] font-bold text-slate-500">Topi, topeng & hidung badut bisa copot kalau kena pukulan tongkat. Helm mengurangi damage kepala.</div>}>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
             {ACCESSORIES.map((a) => {
               const on = acc1 === a.id;

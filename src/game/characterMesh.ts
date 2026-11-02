@@ -2206,6 +2206,10 @@ export interface Googly {
 export interface AccessoryBuild {
   group: THREE.Group; // attached to the head bone
   torsoGroup: THREE.Group | null; // attached to the torso bone (scarf)
+  armLGroup?: THREE.Group | null; // attached to the left arm bone (gloves)
+  armRGroup?: THREE.Group | null; // attached to the right arm bone (gloves)
+  legLGroup?: THREE.Group | null; // attached to the left leg bone (sandals)
+  legRGroup?: THREE.Group | null; // attached to the right leg bone (sandals)
   googly: Googly[];
   detachable: boolean;
 }
@@ -2881,6 +2885,324 @@ function makeShades(hs: Shape[]): AccessoryBuild {
 }
 
 let SCARF_TORSO: Shape[] = [];
+
+/* ==== accessories ported from the sibling menu games (Bounce Paws & Ball Party) ==== */
+
+function blobBounds(shapes: Shape[]) {
+  const mn = new THREE.Vector3(1e9, 1e9, 1e9), mx = new THREE.Vector3(-1e9, -1e9, -1e9);
+  for (const sh of shapes) {
+    if (sh.t !== 0 || sh.noBounds) continue;
+    mn.min(new THREE.Vector3(sh.c[0] - sh.r[0], sh.c[1] - sh.r[1], sh.c[2] - sh.r[2]));
+    mx.max(new THREE.Vector3(sh.c[0] + sh.r[0], sh.c[1] + sh.r[1], sh.c[2] + sh.r[2]));
+  }
+  return { mn, mx };
+}
+
+/** ring of surface points around the torso at height y (bind space) */
+function torsoRing(ts: Shape[], y: number, pad: number, steps = 28): THREE.Vector3[] {
+  const ring: THREE.Vector3[] = [];
+  for (let k = 0; k < steps; k++) {
+    const a = (k / steps) * Math.PI * 2;
+    const d = new THREE.Vector3(Math.sin(a), 0, Math.cos(a));
+    const hit = march(ts, new THREE.Vector3(d.x * 2.2, y, d.z * 2.2), d.clone().negate());
+    ring.push(new THREE.Vector3(hit.p.x, y, hit.p.z).addScaledVector(d, pad));
+  }
+  return ring;
+}
+
+/** Topi koboi bertepi lebar dari Bounce Paws. */
+function makeCowboy(hs: Shape[]): AccessoryBuild {
+  const g = new THREE.Group();
+  const body = hs.filter((sh) => sh.t === 0 && !sh.noBounds);
+  const { mn, mx } = blobBounds(body);
+  const C = toLocal(new THREE.Vector3((mn.x + mx.x) / 2, mx.y + 0.005 * HS, (mn.z + mx.z) / 2 - 0.01 * HS));
+  const R = Math.max(0.34 * HS, ((mx.x - mn.x) / 2) * 1.04);
+  const felt = accMat(0x9a6b3f, 0.75, { clearcoat: 0.05 });
+  const feltDark = accMat(0x5a3a20, 0.8, { clearcoat: 0 });
+  // wavy brim: a squashed torus
+  const brim = new THREE.Mesh(new THREE.TorusGeometry(R * 1.42, R * 0.3, 12, 40), felt);
+  brim.scale.set(1, 1, 0.32);
+  brim.rotation.x = Math.PI / 2;
+  brim.position.set(C.x, C.y + 0.03 * HS, C.z);
+  g.add(brim);
+  // rounded crown block with a pinch
+  const dome = new THREE.Mesh(new THREE.SphereGeometry(R * 0.86, 24, 16, 0, Math.PI * 2, 0, Math.PI / 2), felt);
+  dome.scale.set(1, 0.78, 1.02);
+  dome.position.set(C.x, C.y + 0.02 * HS, C.z);
+  g.add(dome);
+  const dent = new THREE.Mesh(new THREE.SphereGeometry(R * 0.52, 18, 12), felt);
+  dent.scale.set(1, 0.5, 1.05);
+  dent.position.set(C.x, C.y + R * 0.66, C.z);
+  g.add(dent);
+  const band = new THREE.Mesh(new THREE.CylinderGeometry(R * 0.9, R * 0.96, 0.09 * HS, 26, 1, true), feltDark);
+  band.position.set(C.x, C.y + 0.085 * HS, C.z);
+  g.add(band);
+  g.rotation.x = 0.05;
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+
+/** Afro pelangi kembang dari Ball Party. */
+function makeAfro(hs: Shape[]): AccessoryBuild {
+  const g = new THREE.Group();
+  const body = hs.filter((sh) => sh.t === 0 && !sh.noBounds);
+  const { mn, mx } = blobBounds(body);
+  const Cb = new THREE.Vector3((mn.x + mx.x) / 2, mx.y + 0.01 * HS, (mn.z + mx.z) / 2 - 0.01 * HS);
+  const rainbow = [0xe94f4f, 0xf2994a, 0xf2d94a, 0x6fcf6f, 0x56a8f5, 0xa45de8];
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const puff = (dir: THREE.Vector3) => {
+    const dn = dir.clone().normalize();
+    const hit = march(body, Cb.clone().addScaledVector(dn, 1.8), dn.clone().negate());
+    const r = (0.115 + rnd() * 0.06) * HS;
+    const ball = new THREE.Mesh(new THREE.SphereGeometry(r, 16, 12), accMat(rainbow[Math.floor(rnd() * rainbow.length)], 0.9, { clearcoat: 0 }));
+    ball.position.copy(toLocal(hit.p.clone().addScaledVector(hit.n, r * 0.5)));
+    g.add(ball);
+  };
+  for (let i = 0; i < 14; i++) {
+    const a = (i / 14) * Math.PI * 2 + rnd() * 0.3;
+    puff(new THREE.Vector3(Math.sin(a), 0.65 + rnd() * 0.55, Math.cos(a)));
+  }
+  for (let i = 0; i < 3; i++) puff(new THREE.Vector3((rnd() - 0.5) * 0.8, 1.6, (rnd() - 0.5) * 0.8));
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+
+/** shared round-glasses builder (nerd = thick black frames, detective = gold + dark glass) */
+function makeRoundGlasses(hs: Shape[], frameColor: number, lensColor: number, lensOpacity: number, metal: number): AccessoryBuild {
+  const g = new THREE.Group();
+  const frame = accMat(frameColor, 0.35, { clearcoat: 0.8, metalness: metal });
+  const lensM = new THREE.MeshPhysicalMaterial({ color: lensColor, roughness: 0.12, clearcoat: 1, transparent: lensOpacity < 1, opacity: lensOpacity });
+  const ex = EYE.x * TU.eyeX, ey = EYE.y + TU.eyeY;
+  const r = 0.16 * TU.eyeSize * HS;
+  const lensC: THREE.Vector3[] = [];
+  for (const sgn of [1, -1]) {
+    const fr = frameAt(hs, sgn * ex, ey, HS, HO, 0.75);
+    const c = toLocal(fr.P).addScaledVector(fr.D, 0.075 * HS);
+    lensC.push(c);
+    const lens = new THREE.Group();
+    lens.position.copy(c);
+    lens.lookAt(c.clone().add(fr.D));
+    g.add(lens);
+    lens.add(new THREE.Mesh(new THREE.TorusGeometry(r, 0.032 * HS, 10, 30), frame));
+    const glass = new THREE.Mesh(new THREE.CircleGeometry(r * 0.92, 26), lensM);
+    glass.position.z = 0.004 * HS;
+    lens.add(glass);
+    const back = HL(sgn * 0.5, ey + 0.02, -0.12);
+    const outer = c.clone().add(new THREE.Vector3(sgn * r, 0, -0.02 * HS));
+    g.add(coneAB(outer, back, 0.015 * HS, frame, 1, 0.015 * HS));
+  }
+  const mid = lensC[0].clone().add(lensC[1]).multiplyScalar(0.5);
+  const half = Math.max(0.02 * HS, lensC[0].distanceTo(lensC[1]) / 2 - r);
+  const bridge = new THREE.Mesh(new THREE.TorusGeometry(half, 0.022 * HS, 8, 18, Math.PI), frame);
+  bridge.position.copy(mid).add(new THREE.Vector3(0, 0.015 * HS, 0));
+  g.add(bridge);
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+function makeNerd(hs: Shape[]): AccessoryBuild {
+  return makeRoundGlasses(hs, 0x1c1c22, 0xcfe8ff, 0.4, 0);
+}
+function makeDetective(hs: Shape[]): AccessoryBuild {
+  return makeRoundGlasses(hs, 0xc9a227, 0x11161f, 1, 0.6);
+}
+
+/** Hidung badut merah dari kedua game menu. */
+function makeClownNose(hs: Shape[]): AccessoryBuild {
+  const g = new THREE.Group();
+  const nf = frameAt(hs, 0, NOSE.y + TU.noseY + 0.02, HS, HO, 0.8);
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(1, 26, 18), accMat(0xe23b3b, 0.3, { clearcoat: 1 }));
+  const r = 0.115 * HS;
+  nose.scale.set(r, r * 0.92, r);
+  nose.position.copy(toLocal(nf.P)).addScaledVector(nf.D, r * 0.55);
+  g.add(nose);
+  const glint = new THREE.Mesh(new THREE.SphereGeometry(1, 8, 6), new THREE.MeshBasicMaterial({ color: 0xffffff }));
+  glint.scale.setScalar(r * 0.16);
+  glint.position.copy(nose.position).add(new THREE.Vector3(r * 0.3, r * 0.34, r * 0.5));
+  g.add(glint);
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+
+/** Topeng hoki putih dari Bounce Paws. */
+function makeJason(hs: Shape[]): AccessoryBuild {
+  const g = new THREE.Group();
+  const { mn, mx } = blobBounds(hs);
+  const C = toLocal(new THREE.Vector3((mn.x + mx.x) / 2, (mn.y + mx.y) / 2, (mn.z + mx.z) / 2));
+  const Rx = Math.max(0.34 * HS, (mx.x - mn.x) / 2), Rz = Math.max(0.36 * HS, (mx.z - mn.z) / 2);
+  const shellM = accMat(0xf2efe6, 0.45, { clearcoat: 0.35, side: THREE.DoubleSide });
+  const holeM = accMat(0x1a1a1e, 0.6);
+  const M = C.clone().add(new THREE.Vector3(0, 0.03 * HS, Rz * 0.66));
+  const Rm = Rx * 0.92;
+  const shell = new THREE.Mesh(new THREE.SphereGeometry(Rm, 26, 18, 0, Math.PI * 2, 0, Math.PI * 0.62), shellM);
+  shell.rotation.x = -0.42;
+  shell.scale.set(1, 1.04, 0.9);
+  shell.position.copy(M);
+  g.add(shell);
+  for (const sgn of [1, -1]) {
+    const hole = new THREE.Mesh(new THREE.CylinderGeometry(Rm * 0.13, Rm * 0.13, 0.05 * HS, 12), holeM);
+    hole.rotation.x = Math.PI / 2 - 0.25;
+    hole.position.set(sgn * Rm * 0.42, M.y + Rm * 0.18, M.z + Rm * 0.58);
+    g.add(hole);
+  }
+  for (let i = -1; i <= 1; i++) {
+    const vent = new THREE.Mesh(new THREE.BoxGeometry(Rm * 0.13, Rm * 0.07, 0.04 * HS), holeM);
+    vent.position.set(i * Rm * 0.3, M.y - Rm * 0.28, M.z + Rm * 0.66);
+    g.add(vent);
+  }
+  const scar = new THREE.Mesh(new THREE.BoxGeometry(Rm * 0.07, Rm * 0.42, 0.03 * HS), accMat(0xb03a2e, 0.6));
+  scar.position.set(-Rm * 0.62, M.y - Rm * 0.05, M.z + Rm * 0.52);
+  scar.rotation.z = 0.55;
+  g.add(scar);
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+
+/** Sabuk juara dari Ball Party. */
+function makeBelt(ts: Shape[]): AccessoryBuild {
+  const { mn, mx } = blobBounds(ts);
+  const y0 = mn.y + 0.34 * (mx.y - mn.y);
+  const ring = torsoRing(ts, y0, 0.045);
+  const g = new THREE.Group();
+  const leather = accMat(0x3a2416, 0.8, { clearcoat: 0 });
+  const gold = accMat(0xf5c542, 0.25, { clearcoat: 0.8, metalness: 0.5 });
+  const curve = new THREE.CatmullRomCurve3(ring, true);
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(curve, 96, 0.055, 10, true), leather));
+  let front = ring[0];
+  for (const p of ring) if (p.z > front.z) front = p;
+  const out = new THREE.Vector3(front.x, 0, front.z + 1).normalize();
+  const buckle = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.15, 0.05, 6), gold);
+  buckle.rotation.x = Math.PI / 2;
+  buckle.position.copy(front).addScaledVector(out, 0.05);
+  g.add(buckle);
+  const pin = new THREE.Mesh(new THREE.SphereGeometry(0.05, 12, 10), accMat(0xfff3c4, 0.2, { clearcoat: 1, metalness: 0.4 }));
+  pin.position.copy(buckle.position).add(new THREE.Vector3(0, 0.09, 0.03));
+  g.add(pin);
+  return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
+}
+
+/** Celana tinju merah dari Ball Party. */
+function makeBoxers(ts: Shape[]): AccessoryBuild {
+  const { mn, mx } = blobBounds(ts);
+  const yb = mn.y + 0.08 * (mx.y - mn.y);
+  const yt = yb + 0.4 * (mx.y - mn.y);
+  const bot = torsoRing(ts, yb, 0.07, 30);
+  const top = torsoRing(ts, yt, 0.045, 30);
+  const pos: number[] = [], idx: number[] = [];
+  for (let i = 0; i <= 30; i++) {
+    pos.push(bot[i % 30].x, bot[i % 30].y, bot[i % 30].z);
+    pos.push(top[i % 30].x, top[i % 30].y, top[i % 30].z);
+  }
+  for (let i = 0; i < 30; i++) {
+    const a0 = i * 2;
+    idx.push(a0, a0 + 1, a0 + 2, a0 + 1, a0 + 3, a0 + 2);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+  geo.setIndex(idx);
+  geo.computeVertexNormals();
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(geo, accMat(0xd93636, 0.85, { clearcoat: 0, side: THREE.DoubleSide })));
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(top, true), 96, 0.05, 10, true), accMat(0xf6f2ea, 0.7, { clearcoat: 0.1 })));
+  return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
+}
+
+/** Pelampung bebek kuning dari Ball Party. */
+function makeDuckFloat(ts: Shape[]): AccessoryBuild {
+  const { mn, mx } = blobBounds(ts);
+  const ym = mn.y + 0.55 * (mx.y - mn.y);
+  const ring = torsoRing(ts, ym, 0.16, 30);
+  const c = ring.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / ring.length);
+  c.y = ym;
+  let R = 0;
+  let front = ring[0];
+  for (const p of ring) {
+    R += Math.hypot(p.x - c.x, p.z - c.z);
+    if (p.z > front.z) front = p;
+  }
+  R /= ring.length;
+  const g = new THREE.Group();
+  const yellow = accMat(0xf7c948, 0.5, { clearcoat: 0.3 });
+  const torus = new THREE.Mesh(new THREE.TorusGeometry(R, R * 0.3, 14, 30), yellow);
+  torus.rotation.x = Math.PI / 2;
+  torus.position.copy(c);
+  g.add(torus);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(R * 0.3, 18, 14), yellow);
+  head.position.set(front.x, ym + R * 0.3 + R * 0.14, front.z + R * 0.06);
+  g.add(head);
+  const beak = new THREE.Mesh(new THREE.ConeGeometry(R * 0.13, R * 0.34, 12), accMat(0xf28c28, 0.5));
+  beak.rotation.x = Math.PI / 2;
+  beak.position.copy(head.position).add(new THREE.Vector3(0, -R * 0.02, R * 0.32));
+  g.add(beak);
+  for (const sgn of [1, -1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(R * 0.07, 10, 8), accMat(0x222226, 0.4));
+    eye.position.copy(head.position).add(new THREE.Vector3(sgn * R * 0.12, R * 0.1, R * 0.2));
+    g.add(eye);
+  }
+  return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
+}
+
+/** Sapu punggung dari Bounce Paws. */
+function makeBroom(ts: Shape[]): AccessoryBuild {
+  const { mn, mx } = blobBounds(ts);
+  const y1 = mx.y - 0.16 * (mx.y - mn.y);
+  const back = march(ts, new THREE.Vector3(0.05, y1, -2.2), new THREE.Vector3(0, 0, 1)).p;
+  const g = new THREE.Group();
+  const wood = accMat(0xa9805b, 0.8, { clearcoat: 0 });
+  const top = new THREE.Vector3(back.x + 0.2, y1 + 0.95, back.z - 0.2);
+  const bot = new THREE.Vector3(back.x + 0.1, y1 - 0.85, back.z - 0.06);
+  g.add(coneAB(top, bot, 0.05, wood, 1, 0.042));
+  const straw = accMat(0xd9a441, 0.9, { clearcoat: 0 });
+  const cluster = new THREE.Group();
+  for (let i = 0; i < 8; i++) {
+    const t = i / 7 - 0.5;
+    const a = coneAB(bot.clone().add(new THREE.Vector3(t * 0.1, 0.1, 0)), bot.clone().add(new THREE.Vector3(t * 0.42, -0.34 - (i % 2) * 0.08, 0)), 0.035, straw, 1, 0.012);
+    cluster.add(a);
+  }
+  g.add(cluster);
+  const tie = new THREE.Mesh(new THREE.TorusGeometry(0.075, 0.02, 8, 18), accMat(0xd93636, 0.6));
+  tie.position.copy(bot).add(new THREE.Vector3(0, 0.09, 0));
+  tie.rotation.x = Math.PI / 2;
+  g.add(tie);
+  return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
+}
+
+/** Sarung tinju merah kembar dari Ball Party (ikut ayun lengan). */
+function makeGloves(): AccessoryBuild {
+  const mk = () => {
+    const g = new THREE.Group();
+    const fist = new THREE.Mesh(new THREE.SphereGeometry(0.14, 22, 16), accMat(0xd93a3a, 0.55, { clearcoat: 0.4 }));
+    fist.scale.set(1, 0.94, 1.05);
+    fist.position.set(0, 0.01, 0.02);
+    g.add(fist);
+    const cuff = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.095, 0.09, 14), accMat(0xf6f2ea, 0.7, { clearcoat: 0.1 }));
+    cuff.position.set(0, 0.14, 0.015);
+    g.add(cuff);
+    return shadowed(g);
+  };
+  return { group: new THREE.Group(), torsoGroup: null, armLGroup: mk(), armRGroup: mk(), googly: [], detachable: false };
+}
+
+/** Sandal jepit biru dari Bounce Paws (ikut kaki). */
+function makeSandal(): AccessoryBuild {
+  const mk = () => {
+    const g = new THREE.Group();
+    const soleM = accMat(0x2f6fd0, 0.7, { clearcoat: 0.1 });
+    const strapM = accMat(0xbfe0ff, 0.6, { clearcoat: 0.2 });
+    const sole = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), soleM);
+    sole.scale.set(0.16, 0.05, 0.26);
+    sole.position.set(0, -0.1, 0.04);
+    g.add(sole);
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.022, 0.022, 0.05, 8), strapM);
+    post.position.set(0, -0.05, 0.14);
+    g.add(post);
+    for (const sgn of [1, -1]) {
+      const strap = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.025, 0.17), strapM);
+      strap.position.set(sgn * 0.07, -0.045, 0.05);
+      strap.rotation.y = -sgn * 0.45;
+      strap.rotation.x = 0.18;
+      g.add(strap);
+    }
+    return shadowed(g);
+  };
+  return { group: new THREE.Group(), torsoGroup: null, legLGroup: mk(), legRGroup: mk(), googly: [], detachable: false };
+}
+
 function buildAccessory(kind: AccessoryId, hs: Shape[], torso: Shape[] = []): AccessoryBuild | null {
   SCARF_TORSO = torso;
   switch (kind) {
@@ -2900,6 +3222,30 @@ function buildAccessory(kind: AccessoryId, hs: Shape[], torso: Shape[] = []): Ac
       return makeCrown(hs);
     case "shades":
       return makeShades(hs);
+    case "cowboy":
+      return makeCowboy(hs);
+    case "afro":
+      return makeAfro(hs);
+    case "nerd":
+      return makeNerd(hs);
+    case "detective":
+      return makeDetective(hs);
+    case "clownnose":
+      return makeClownNose(hs);
+    case "jason":
+      return makeJason(hs);
+    case "belt":
+      return makeBelt(torso);
+    case "boxers":
+      return makeBoxers(torso);
+    case "duckfloat":
+      return makeDuckFloat(torso);
+    case "broom":
+      return makeBroom(torso);
+    case "gloves":
+      return makeGloves();
+    case "sandal":
+      return makeSandal();
     default:
       return null;
   }
@@ -2977,10 +3323,15 @@ export function buildCharacterVisual(def: AnimalDef, accessory: AccessoryId = "n
     if (!acc.googly.length) {
       batchRigidDetails(acc.group);
       if (acc.torsoGroup) batchRigidDetails(acc.torsoGroup);
+      for (const limb of [acc.armLGroup, acc.armRGroup, acc.legLGroup, acc.legRGroup]) if (limb) batchRigidDetails(limb);
     }
     bones[1].add(acc.group);
     if (acc.torsoGroup) bones[0].add(acc.torsoGroup);
-    if (accessory === "helmet") bones[1].traverse((o) => o.name === "whisker" && (o.visible = false));
+    if (acc.armLGroup) bones[2].add(acc.armLGroup);
+    if (acc.armRGroup) bones[3].add(acc.armRGroup);
+    if (acc.legLGroup) bones[4].add(acc.legLGroup);
+    if (acc.legRGroup) bones[5].add(acc.legRGroup);
+    if (accessory === "helmet" || accessory === "jason") bones[1].traverse((o) => o.name === "whisker" && (o.visible = false));
   }
 
   return {
