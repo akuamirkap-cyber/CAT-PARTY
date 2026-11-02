@@ -52,7 +52,8 @@ export const BOT_NAMES = [
 export type AccessoryId =
   | "none" | "capRed" | "capBlue" | "capNewRed" | "capNewBlue" | "dolit" | "helmet" | "crown" | "shades"
   | "cowboy" | "afro" | "nerd" | "detective" | "clownnose" | "jason"
-  | "belt" | "boxers" | "duckfloat" | "broom" | "gloves" | "sandal";
+  | "belt" | "boxers" | "duckfloat" | "broom" | "gloves" | "sandal"
+  | "classic" | "cool" | "pixel" | "collar" | "mallet";
 export const ACCESSORIES: { id: AccessoryId; name: string; icon: string }[] = [
   { id: "none", name: "Polos", icon: "🚫" },
   { id: "capNewRed", name: "Topi Baseball Merah", icon: "🧢" },
@@ -73,4 +74,9 @@ export const ACCESSORIES: { id: AccessoryId; name: string; icon: string }[] = [
   { id: "broom", name: "Sapu Punggung", icon: "🧹" },
   { id: "gloves", name: "Sarung Tinju", icon: "🧤" },
   { id: "sandal", name: "Sandal Jepit", icon: "🩴" },
+  { id: "classic", name: "Kacamata Klasik", icon: "🕶️" },
+  { id: "cool", name: "Kacamata Wayfarer", icon: "😎" },
+  { id: "pixel", name: "Kacamata Pixel", icon: "🕹️" },
+  { id: "collar", name: "Kalung Lonceng", icon: "🔔" },
+  { id: "mallet", name: "Palu Kayu", icon: "🔨" },
 ];

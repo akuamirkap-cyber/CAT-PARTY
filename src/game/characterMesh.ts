@@ -3155,6 +3155,163 @@ function makeDuckFloat(ts: Shape[]): AccessoryBuild {
   return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
 }
 
+/** Kacamata klasik bingkai penuh (Sunglasses v2 dari kedua game menu). */
+function makeClassicGlasses(hs: Shape[]): AccessoryBuild {
+  const g = new THREE.Group();
+  const rimM = accMat(0x0f0f12, 0.3, { clearcoat: 0.6 });
+  const lensM = accMat(0x1e1b4b, 0.08, { clearcoat: 1, metalness: 0.55 });
+  const glintM = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 });
+  const ex = EYE.x * TU.eyeX, ey = EYE.y + TU.eyeY;
+  const r = 0.155 * TU.eyeSize * HS;
+  const inner: THREE.Vector3[] = [];
+  for (const sgn of [1, -1]) {
+    const fr = frameAt(hs, sgn * ex, ey, HS, HO, 0.75);
+    const c = toLocal(fr.P).addScaledVector(fr.D, 0.08 * HS);
+    const lens = new THREE.Group();
+    lens.position.copy(c);
+    lens.lookAt(c.clone().add(fr.D));
+    g.add(lens);
+    const glass = new THREE.Mesh(new THREE.SphereGeometry(r, 24, 18), lensM);
+    glass.scale.set(1.2, 0.85, 0.35);
+    lens.add(glass);
+    lens.add(new THREE.Mesh(new THREE.TorusGeometry(r * 1.03, 0.032 * HS, 12, 36), rimM));
+    const g1 = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), glintM);
+    g1.scale.set(r * 0.32, r * 0.12, r * 0.08);
+    g1.position.set(-sgn * r * 0.35, r * 0.3, r * 0.36);
+    g1.rotation.z = 0.7;
+    lens.add(g1);
+    const g2 = new THREE.Mesh(new THREE.SphereGeometry(1, 10, 8), glintM);
+    g2.scale.set(r * 0.16, r * 0.07, r * 0.07);
+    g2.position.set(sgn * r * 0.2, -r * 0.35, r * 0.36);
+    g2.rotation.z = 0.7;
+    lens.add(g2);
+    const back = HL(sgn * 0.5, ey + 0.02, -0.12);
+    const outer = c.clone().add(new THREE.Vector3(sgn * r * 1.25, 0, -0.02 * HS));
+    g.add(coneAB(outer, back, 0.016 * HS, rimM, 1, 0.016 * HS));
+    inner.push(c.clone().add(new THREE.Vector3(-sgn * r * 1.15, 0.02 * HS, 0)));
+  }
+  g.add(coneAB(inner[0], inner[1], 0.02 * HS, rimM, 1, 0.02 * HS));
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+
+/** Kacamata wayfarer kotak + brow bar emas (CoolGlasses dari Bounce Paws). */
+function makeCoolGlasses(hs: Shape[]): AccessoryBuild {
+  const g = new THREE.Group();
+  const main = accMat(0x1c1c24, 0.2, { clearcoat: 0.8, metalness: 0.3 });
+  const gold = accMat(0xe8a800, 0.25, { clearcoat: 0.6, metalness: 0.85 });
+  const glintM = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8 });
+  const ex = EYE.x * TU.eyeX, ey = EYE.y + TU.eyeY;
+  const lw = 0.31 * HS, lh = 0.24 * HS;
+  const tops: THREE.Vector3[] = [];
+  for (const sgn of [1, -1]) {
+    const fr = frameAt(hs, sgn * ex, ey, HS, HO, 0.75);
+    const c = toLocal(fr.P).addScaledVector(fr.D, 0.085 * HS);
+    const lens = new THREE.Group();
+    lens.position.copy(c);
+    lens.lookAt(c.clone().add(fr.D));
+    g.add(lens);
+    const box = new THREE.Mesh(new THREE.BoxGeometry(lw, lh, 0.1 * HS), main);
+    lens.add(box);
+    const slash = new THREE.Mesh(new THREE.BoxGeometry(0.045 * HS, 0.2 * HS, 0.015 * HS), glintM);
+    slash.position.set(-sgn * 0.06 * HS, 0.02 * HS, 0.055 * HS);
+    slash.rotation.z = 0.5;
+    lens.add(slash);
+    const dot = new THREE.Mesh(new THREE.SphereGeometry(0.022 * HS, 10, 8), gold);
+    dot.position.set(sgn * lw * 0.42, lh * 0.28, 0.01);
+    lens.add(dot);
+    const back = HL(sgn * 0.5, ey + 0.02, -0.12);
+    const outer = c.clone().add(new THREE.Vector3(sgn * lw * 0.5, 0, -0.02 * HS));
+    g.add(coneAB(outer, back, 0.018 * HS, main, 1, 0.018 * HS));
+    tops.push(c.clone().add(new THREE.Vector3(0, lh * 0.52, 0)));
+  }
+  // gold brow bar connecting both tops, plus the bridge
+  g.add(coneAB(tops[0], tops[1], 0.022 * HS, gold, 1, 0.022 * HS));
+  g.add(coneAB(tops[0].clone().add(new THREE.Vector3(0, -lh * 0.55, 0)), tops[1].clone().add(new THREE.Vector3(0, -lh * 0.55, 0)), 0.018 * HS, main, 1, 0.018 * HS));
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+
+/** Kacamata pixel 8-bit (PixelShades dari Ball Party). */
+function makePixelGlasses(hs: Shape[]): AccessoryBuild {
+  const g = new THREE.Group();
+  const cells: [number, number][] = [];
+  for (let x = 0; x < 12; x++) cells.push([x, 3]);
+  for (const v of [[0, 2], [0, 1], [1, 2], [1, 1], [2, 2], [2, 1], [3, 2], [4, 2], [4, 1], [7, 2], [7, 1], [8, 2], [8, 1], [9, 2], [9, 1], [10, 2], [11, 2], [11, 1], [1, 0], [2, 0], [3, 1], [8, 0], [9, 0], [10, 1]]) cells.push(v as [number, number]);
+  const white = new Set(["2,2", "3,1", "9,2", "10,1"]);
+  const u = 0.062 * HS;
+  const blackM = accMat(0x050505, 0.45, { clearcoat: 0.3 });
+  const whiteM = accMat(0xffffff, 0.3, { clearcoat: 0.6 });
+  const ex = EYE.x * TU.eyeX, ey = EYE.y + TU.eyeY + 0.05;
+  const fr = frameAt(hs, 0, ey, HS, HO, 0.75);
+  const c = toLocal(fr.P).addScaledVector(fr.D, 0.1 * HS);
+  const mosaic = new THREE.Group();
+  mosaic.position.copy(c);
+  mosaic.lookAt(c.clone().add(fr.D));
+  for (const [x, y] of cells) {
+    const isW = white.has(`${x},${y}`);
+    const px = new THREE.Mesh(new THREE.BoxGeometry(u, u, 0.05 * HS), isW ? whiteM : blackM);
+    px.position.set((x - 5.5) * u, (y - 1.5) * u, isW ? 0.012 * HS : 0);
+    mosaic.add(px);
+  }
+  g.add(mosaic);
+  for (const sgn of [1, -1]) {
+    const back = HL(sgn * 0.5, ey, -0.12);
+    const outer = c.clone().add(new THREE.Vector3(sgn * 6.4 * u, 0, -0.02 * HS));
+    g.add(coneAB(outer, back, 0.016 * HS, blackM, 1, 0.016 * HS));
+  }
+  return { group: shadowed(g), torsoGroup: null, googly: [], detachable: true };
+}
+
+/** Kalung merah dengan lonceng emas (Collar dari Ball Party). */
+function makeCollar(ts: Shape[]): AccessoryBuild {
+  const { mn, mx } = blobBounds(blobsOnly(ts));
+  const y0 = mx.y - 0.17 * (mx.y - mn.y); // where the neck meets the shoulders
+  const ring = torsoRing(ts, y0, 0.05);
+  const g = new THREE.Group();
+  const red = accMat(0xdc2626, 0.45, { clearcoat: 0.4 });
+  g.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(ring, true), 96, 0.05, 10, true), red));
+  let front = ring[0];
+  for (const p of ring) if (p.z > front.z) front = p;
+  const bell = new THREE.Mesh(new THREE.SphereGeometry(0.078, 16, 12), accMat(0xfacc15, 0.2, { clearcoat: 1, metalness: 0.9 }));
+  bell.position.copy(front).add(new THREE.Vector3(0, -0.07, 0.075));
+  g.add(bell);
+  return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
+}
+
+/** Palu kayu besar di punggung (Mallet dari Ball Party, pasangan sapu). */
+function makeMallet(ts: Shape[]): AccessoryBuild {
+  const { mn, mx } = blobBounds(blobsOnly(ts));
+  const y1 = mx.y - 0.22 * (mx.y - mn.y);
+  const back = march(blobsOnly(ts), new THREE.Vector3(-0.05, y1, -1.5), new THREE.Vector3(0, 0, 1)).p;
+  const g = new THREE.Group();
+  const wood = accMat(0xa86a32, 0.7, { clearcoat: 0.1 });
+  const headM = accMat(0xc8894a, 0.65, { clearcoat: 0.1 });
+  const capM = accMat(0xe8b878, 0.8, { clearcoat: 0 });
+  const redM = accMat(0xd43b2f, 0.6, { clearcoat: 0.1 });
+  // handle leans against the back, head peeking out beside the shoulder blade
+  const bot = new THREE.Vector3(back.x - 0.06, y1 - 0.85, back.z - 0.02);
+  const top = new THREE.Vector3(back.x - 0.38, y1 + 0.3, back.z - 0.14);
+  g.add(coneAB(bot, top, 0.055, wood, 1, 0.045));
+  const ring = new THREE.Mesh(new THREE.TorusGeometry(0.06, 0.02, 8, 18), redM);
+  const mid = bot.clone().lerp(top, 0.72);
+  ring.position.copy(mid);
+  ring.quaternion.setFromUnitVectors(new THREE.Vector3(0, 0, 1), top.clone().sub(bot).normalize());
+  g.add(ring);
+  // mallet head across the stick top
+  const head = new THREE.Mesh(new THREE.CylinderGeometry(0.17, 0.17, 0.52, 22), headM);
+  head.position.copy(top).add(new THREE.Vector3(0.02, 0.06, 0));
+  head.rotation.z = Math.PI / 2;
+  head.rotation.y = 0.25;
+  g.add(head);
+  for (const sgn of [1, -1]) {
+    const cap = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.17, 0.035, 22), capM);
+    cap.position.copy(head.position).add(new THREE.Vector3(sgn * 0.26 * Math.cos(0.25), 0, -sgn * 0.26 * Math.sin(0.25)));
+    cap.rotation.z = Math.PI / 2;
+    cap.rotation.y = 0.25;
+    g.add(cap);
+  }
+  return { group: new THREE.Group(), torsoGroup: shadowed(g), googly: [], detachable: false };
+}
+
 /** Sapu punggung dari Bounce Paws. */
 function makeBroom(ts: Shape[]): AccessoryBuild {
   const { mn, mx } = blobBounds(blobsOnly(ts));
@@ -3275,6 +3432,16 @@ function buildAccessory(kind: AccessoryId, hs: Shape[], torso: Shape[] = []): Ac
       return makeGloves();
     case "sandal":
       return makeSandal();
+    case "classic":
+      return makeClassicGlasses(hs);
+    case "cool":
+      return makeCoolGlasses(hs);
+    case "pixel":
+      return makePixelGlasses(hs);
+    case "collar":
+      return makeCollar(torso);
+    case "mallet":
+      return makeMallet(torso);
     default:
       return null;
   }

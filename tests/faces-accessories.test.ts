@@ -24,11 +24,11 @@ test('the slide-1 accessories (crown + shades) exist and build real 3D props', (
     assert.ok(visual.accessory && verts > 100, `${id} builds real geometry (${verts} verts)`);
     assert.equal(visual.googly.length, 0, 'neither prop adds googly eyes');
   }
-  assert.ok(ACCESSORIES.length >= 19, `full accessory set (${ACCESSORIES.length})`);
+  assert.ok(ACCESSORIES.length >= 24, `full accessory set (${ACCESSORIES.length})`);
 });
 
 test('every accessory from the menu games (Bounce Paws & Ball Party) is wearable', () => {
-  const fromGames = ['cowboy', 'afro', 'nerd', 'detective', 'clownnose', 'jason', 'belt', 'boxers', 'duckfloat', 'broom', 'gloves', 'sandal'];
+  const fromGames = ['cowboy', 'afro', 'nerd', 'detective', 'clownnose', 'jason', 'belt', 'boxers', 'duckfloat', 'broom', 'gloves', 'sandal', 'classic', 'cool', 'pixel', 'collar', 'mallet'];
   for (const id of fromGames) {
     assert.ok(ACCESSORIES.some((a) => a.id === id), `${id} is in the wardrobe list`);
     const visual = buildCharacterVisual(ANIMALS[0], id);
