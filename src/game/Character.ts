@@ -1395,9 +1395,19 @@ export class Character {
     // the ragdoll (and shortened the punch reach).
     const hSpeedNow = Math.hypot(t.velocity.x, t.velocity.z);
     const attacking = this.punchTimer > 0 || this.swingTimer > 0;
-    let ctrl = this.grounded
-      ? (braking ? (hSpeedNow > 0.4 && !attacking ? 17 : 9) : 12.5)
-      : 3.1;
+    let ctrl: number;
+    if (!this.grounded) ctrl = 3.1;
+    else if (braking) {
+      // Comfort brake: grab hard while there is speed to shed, then let the
+      // gain ease toward the idle stance as the cat settles — no final shudder
+      // (8 at a crawl grows continuously into 19 at full run).
+      ctrl = hSpeedNow > 0.4 && !attacking ? 8 + 11 * Math.min(1, hSpeedNow / 4.5) : 9;
+    } else {
+      // Launch pop off the line for a snappy start, easing into the steady
+      // cruise pull so the run-up stays smooth instead of twitchy.
+      const launch = Math.max(0, 1 - hSpeedNow / 3.2);
+      ctrl = 14 + 10 * launch;
+    }
     if (this.stagger > 0) ctrl *= 0.3;
     if (this.punchTimer > 0) ctrl *= 0.5;
     if (this.dropkickTimer > 0 || this.headbuttTimer > 0.1 || this.weaponContest) ctrl = 0;
@@ -1414,10 +1424,52 @@ export class Character {
       }
       ctrl = 0;
     }
-    const ax = clamp((dx + gvx - t.velocity.x) * ctrl, -55, 55);
-    const az = clamp((dz + gvz - t.velocity.z) * ctrl, -55, 55);
-    t.force.x += this.totalMass * ax;
-    t.force.z += this.totalMass * az;
+    let ax = clamp((dx + gvx - t.velocity.x) * ctrl, -55, 55);
+    let az = clamp((dz + gvz - t.velocity.z) * ctrl, -55, 55);
+    // The spring's weak tail made both ends mushy: a launch crawling into its
+    // last 0.4 m/s and a stop dribbling to a halt. Guarantee a small closing
+    // rate while there is still a real gap (never against stagger/attacks).
+    if (this.grounded && this.stagger <= 0 && !attacking && this.climbAssist <= 0) {
+      if (!braking) {
+        if (Math.abs(ax) < 5 && dx - t.velocity.x > 0.25) ax = 5 * Math.sign(dx - t.velocity.x);
+        if (Math.abs(az) < 5 && dz - t.velocity.z > 0.25) az = 5 * Math.sign(dz - t.velocity.z);
+      } else {
+        if (Math.abs(ax) < 5 && Math.abs(t.velocity.x) > 0.3) ax = -Math.sign(t.velocity.x) * 5;
+        if (Math.abs(az) < 5 && Math.abs(t.velocity.z) > 0.3) az = -Math.sign(t.velocity.z) * 5;
+      }
+    }
+    // Apply the command to the WHOLE chassis: pushing only the torso made the
+    // limbs trail through the joints, so the cat answered with about half its
+    // weight (mushy gas, a long brake slide, and a lean into every stop).
+    for (const b of this.parts) {
+      b.force.x += b.mass * ax;
+      b.force.z += b.mass * az;
+    }
+    // Chassis coupling: the control force only pushes the torso, so the head
+    // and limbs kept rolling long after the command — mushy gas and a long
+    // slide on the brake. Dragging every part toward the torso's horizontal
+    // velocity makes the whole cat answer as one body (and stops the legs
+    // tipping forward past the feet on hard stops).
+    if (this.grounded && ctrl > 0 && this.climbAssist <= 0) {
+      const tvx = t.velocity.x;
+      const tvz = t.velocity.z;
+      for (const b of this.parts) {
+        if (b === t) continue;
+        b.force.x += b.mass * (tvx - b.velocity.x) * 14;
+        b.force.z += b.mass * (tvz - b.velocity.z) * 14;
+      }
+    }
+    // Traction: pull the sideways part of the motion into the facing so a
+    // turn-in carves and finishes tidy instead of skating out of the arc
+    // (planted, moving under control, and never mid-attack).
+    if (this.grounded && !braking && !attacking && mlen > 0.1 && this.stagger <= 0 && !this.weaponContest && this.climbAssist <= 0) {
+      const f = this.fwd(v3);
+      const fwdV = t.velocity.x * f.x + t.velocity.z * f.z;
+      const latX = t.velocity.x - f.x * fwdV;
+      const latZ = t.velocity.z - f.z * fwdV;
+      t.force.x -= this.totalMass * clamp(latX * 7, -22, 22);
+      t.force.z -= this.totalMass * clamp(latZ * 7, -22, 22);
+    }
 
     // ---------- legs ----------
     const moveAmt = clamp(hSpeed / 4.2, 0, 1.25);
