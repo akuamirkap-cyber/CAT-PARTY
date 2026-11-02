@@ -16,6 +16,14 @@ import { disposeCharacterDetails } from "./characterMesh";
 import { impactEffect, knockoutEffectColor } from "./impactEffects";
 const _ev = new THREE.Vector3();
 
+/** Face combos every bot picks from — no grumpy anywhere, per the player. */
+const BOT_EYE_STYLES: EyeStyleId[] = ["default", "round", "slit", "green", "goofy"];
+const BOT_EXPRESSIONS: ExpressionId[] = ["default", "tongue"];
+const randomFace = () => ({
+  eyeStyle: BOT_EYE_STYLES[Math.floor(Math.random() * BOT_EYE_STYLES.length)],
+  expression: BOT_EXPRESSIONS[Math.floor(Math.random() * BOT_EXPRESSIONS.length)],
+});
+
 export interface GameOptions {
   p1Animal: AnimalId;
   twoPlayer: boolean;
@@ -150,7 +158,8 @@ export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "
     const def = pool[Math.floor(Math.random() * pool.length)];
     used.add(def.id);
     const acc: AccessoryId = Math.random() < 0.7 ? ACCESSORIES[1 + Math.floor(Math.random() * (ACCESSORIES.length - 1))].id : "none";
-    roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: "default", expression: "default", team: teams ? pickTeam() : -1, flag: nextFlag() });
+    const face = randomFace();
+    roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: face.eyeStyle, expression: face.expression, team: teams ? pickTeam() : -1, flag: nextFlag() });
   }
   return roster;
 }

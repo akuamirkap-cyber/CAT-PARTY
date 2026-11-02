@@ -33,6 +33,9 @@ export function buildRoster(opts: {
   bots: number;
 }): LobbyMember[] {
   const flags = pickFlags(32);
+  // same face pool as the real match bots — no grumpy, cheerful mix only
+  const LOBBY_EYES: EyeStyleId[] = ["default", "round", "slit", "green", "goofy"];
+  const LOBBY_MOUTH: ExpressionId[] = ["default", "tongue"];
   const used = new Set<AnimalId>([opts.you.animal]);
   if (opts.friend) used.add(opts.friend.animal);
   const pool = ANIMALS.map((a) => a.id).filter((id) => !used.has(id));
@@ -40,7 +43,15 @@ export function buildRoster(opts: {
   for (let i = 0; i < opts.bots; i++) {
     const animal = pool[i % pool.length] ?? ANIMALS[i % ANIMALS.length].id;
     const accessory = ACCESSORIES[1 + ((i * 5) % Math.max(1, ACCESSORIES.length - 1))].id;
-    crowded.push({ id: `bot-${i}`, name: BOT_NAMES[i % BOT_NAMES.length], animal, accessory, flag: flags[i % flags.length] });
+    crowded.push({
+      id: `bot-${i}`,
+      name: BOT_NAMES[i % BOT_NAMES.length],
+      animal,
+      accessory,
+      flag: flags[i % flags.length],
+      eyeStyle: LOBBY_EYES[i % LOBBY_EYES.length],
+      expression: LOBBY_MOUTH[i % LOBBY_MOUTH.length],
+    });
   }
   const you: LobbyMember = {
     id: "you",
@@ -55,7 +66,7 @@ export function buildRoster(opts: {
   // You always stand in the middle of the row, your couch buddy right beside you.
   const pair: LobbyMember[] = [];
   if (opts.friend) {
-    pair.push({ id: "p2", name: "P2", animal: opts.friend.animal, accessory: opts.friend.accessory, friend: true, flag: flags[1] });
+    pair.push({ id: "p2", name: "P2", animal: opts.friend.animal, accessory: opts.friend.accessory, friend: true, flag: flags[1], eyeStyle: LOBBY_EYES[1], expression: LOBBY_MOUTH[0] });
   }
   pair.push(you);
   const start = Math.floor((crowded.length + pair.length - pair.length) / 2);
