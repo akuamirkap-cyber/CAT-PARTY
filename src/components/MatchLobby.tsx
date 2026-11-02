@@ -397,6 +397,7 @@ export default function MatchLobby({ you, friend, bots, mode, onChangeAnimal, on
       </div>
 
       <div className="ml-dock">
+      <div className="ml-pick-title">PILIH KARAKTER</div>
       <div className="ml-picker">
         <button type="button" aria-label="Kucing sebelumnya" onClick={() => onChangeAnimal(-1)}>‹</button>
         <div>
@@ -408,16 +409,18 @@ export default function MatchLobby({ you, friend, bots, mode, onChangeAnimal, on
 
       <div className="ml-deck" role="group" aria-label="Pilih kucing">
         {ANIMALS.map((a) => (
-          <button
-            key={a.id}
-            type="button"
-            className={`ml-deck-cat ${you.animal === a.id ? "is-on" : ""}`}
-            title={a.name}
-            aria-pressed={you.animal === a.id}
-            onClick={() => onPickAnimal(a.id)}
-          >
-            <Portrait id={a.id} fallback={a.emoji} />
-          </button>
+          <div className="ml-deck-wrap" key={a.id}>
+            <button
+              type="button"
+              className={`ml-deck-cat ${you.animal === a.id ? "is-on" : ""}`}
+              title={a.name}
+              aria-pressed={you.animal === a.id}
+              onClick={() => onPickAnimal(a.id)}
+            >
+              <Portrait id={a.id} fallback={a.emoji} />
+            </button>
+            <small className="ml-deck-name">{a.name}</small>
+          </div>
         ))}
       </div>
 
