@@ -181,6 +181,23 @@ export default function MenuScreen(props: Props) {
         </div>
       </aside>
 
+      {/* the other games bundled in this repo, right under the menu screen */}
+      <nav className="mm-games" aria-label="Game lain di repo ini">
+        <span className="mm-games-title">🎮 GAME LAIN:</span>
+        <a className="mm-game-chip" href="/games/gameplay-1/index.html" target="_blank" rel="noreferrer" title="animal-party-physics-gameplay.zip — versi pertama">
+          <span className="mm-game-emoji">🐈</span>
+          <span className="mm-game-name">Gameplay Asli</span>
+        </a>
+        <a className="mm-game-chip" href="/games/gameplay-2/index.html" target="_blank" rel="noreferrer" title="animal-party-physics-gameplay (1).zip — bom, bot & aksesoris">
+          <span className="mm-game-emoji">💣</span>
+          <span className="mm-game-name">Versi Bom & Bot</span>
+        </a>
+        <a className="mm-game-chip" href="/games/cat-asset/index.html" target="_blank" rel="noreferrer" title="create-3d-asset-without-hat.zip — studio aset kucing 3D">
+          <span className="mm-game-emoji">🎨</span>
+          <span className="mm-game-name">Studio Aset 3D</span>
+        </a>
+      </nav>
+
       <footer className="mm-bottom">
         <span className="mm-hints"><kbd>↑ ↓</kbd> pilih <i /> <kbd>ENTER</kbd> buka <i /> <kbd>← →</kbd> ganti kucing</span>
         <span className="mm-version">v1.2 · MEOW BRAWL</span>
