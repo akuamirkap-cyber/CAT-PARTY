@@ -5,7 +5,7 @@ import * as THREE from 'three';
 import { Character } from '../src/game/Character';
 import { ANIMALS } from '../src/game/animals';
 import { emptyControl } from '../src/game/input';
-import { createRoster, type GameOptions } from '../src/game/Game';
+import { createRoster, teamStocks, TEAM_LIVES, type GameOptions } from '../src/game/Game';
 
 const context = new Proxy({}, { get: () => () => ({ addColorStop() {} }), set: () => true });
 (globalThis as any).document = { createElement: () => ({ getContext: () => context }) };
@@ -155,4 +155,41 @@ test('bot brains only hunt the enemy team', async () => {
   assert.ok([...seen].every((n) => n.startsWith('FOE')), `the brain only ever locks onto the blue team (saw: ${[...seen].join(', ')})`);
   assert.ok(punches > 0, 'the bot still fights');
   bot.removeFromWorld(); mate.removeFromWorld(); foeA.removeFromWorld(); foeB.removeFromWorld();
+});
+
+test('a fallen team cat keeps its lives, parks, and respawns with a fresh body', async () => {
+  const { world, make } = setup();
+  const a = make(0, 'RED_A', 0, 0, 0, 0);
+  Character.all = [a];
+  a.lives = TEAM_LIVES;
+  for (let i = 0; i < 120; i++) step(world, [a], i);
+  a.parkForRespawn();
+  assert.ok(!a.alive && !a.root.visible, 'parked cat is hidden and out of play');
+  for (let i = 0; i < 60; i++) step(world, [a], i);
+  assert.ok(Math.abs(a.torso.position.y + 8) < 0.01, 'parked cat freezes below the deck instead of falling forever');
+  a.respawnAt(1.5, 0.05, -1.2, 1.2);
+  assert.ok(a.alive && a.root.visible, 'respawned cat is back in play');
+  assert.ok(Math.hypot(a.torso.position.x - 1.5, a.torso.position.z + 1.2) < 0.05, 'respawn lands at the requested spot');
+  assert.equal(a.torso.velocity.length(), 0, 'respawn starts at rest');
+  assert.equal(a.dizzy, 0, 'respawn clears the dizzy meter');
+  assert.equal(a.holds.armL, null && a.holds.armR, null, 'respawn drops every hold');
+  for (let i = 0; i < 90; i++) step(world, [a], i);
+  assert.ok(a.grounded, 'the respawned cat settles back onto the deck');
+  a.removeFromWorld();
+});
+
+test('teamStocks counts lives of the fighting and the waiting, not the gone', () => {
+  const cat = (over: Partial<{ removed: boolean; alive: boolean; team: number; lives: number; respawnT: number }>) => ({
+    removed: false, alive: true, team: 0, lives: TEAM_LIVES, respawnT: 0, ...over,
+  });
+  const chars = [
+    cat({ team: 0, lives: 3 }),                       // red fighting, 3 stocks
+    cat({ team: 0, alive: false, lives: 2, respawnT: 1.2 }), // red waiting to respawn: 2 stocks
+    cat({ team: 0, alive: false, lives: 0 }),         // red gone for good
+    cat({ team: 1, lives: 1 }),                       // blue on its last life
+    cat({ team: 1, removed: true, lives: 0 }),        // blue removed from the world
+    cat({ team: -1, lives: 5 }),                      // no-team cat never counts
+  ];
+  assert.deepEqual(teamStocks(chars as never), [5, 1], 'red has 3+2 in play, blue is down to its last life');
+  assert.deepEqual(teamStocks([cat({ team: 1, alive: false, lives: 0 })] as never), [0, 0], 'a fully dead team scores zero');
 });

@@ -45,6 +45,7 @@ export interface HudPlayer {
   slot: number;
   wins: number;
   team: number;
+  lives: number;
 }
 
 export interface HudState {
@@ -59,6 +60,7 @@ export interface HudState {
   banner: string | null;
   winner: { name: string; emoji: string; human: boolean; animal: AnimalId | null; eyeStyle: EyeStyleId; expression: ExpressionId; team?: 0 | 1 } | null;
   meAlive: boolean;
+  respawnIn: number | null;
   mode: "brawl" | "bomb" | "teams";
   teamMode: boolean;
   teamWins: [number, number];
@@ -144,6 +146,20 @@ export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "
     roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: "default", expression: "default", team: teams ? pickTeam() : -1 });
   }
   return roster;
+}
+
+/** lives each cat gets in a team match (Digimon-style stock) */
+export const TEAM_LIVES = 3;
+
+/** Remaining stocks per team: alive cats plus the lives they still hold. */
+export function teamStocks(chars: { removed: boolean; alive: boolean; team: number; lives: number; respawnT: number }[]): [number, number] {
+  const t: [number, number] = [0, 0];
+  for (const c of chars) {
+    if (c.removed || c.team < 0) continue;
+    const waiting = !c.alive && c.respawnT > 0;
+    if (c.alive || waiting) t[c.team] += Math.max(0, c.lives);
+  }
+  return t;
 }
 
 const wrapAngle = (a: number) => {
@@ -461,9 +477,9 @@ export class Game {
       }
       pos.y = this.arena!.surfaceHeight(pos.z) + 0.05;
       const yaw = Math.atan2(-pos.x, -pos.z);
-      const c = new Character(this.world, i, r.def, r.name, r.slot, this.hooks, pos, yaw, emptyControl(), r.acc, r.eyeStyle, r.expression);
+      const c = new Character(this.world, i, r.def, r.name, r.slot, this.hooks, pos, yaw, emptyControl(), r.acc, r.eyeStyle, r.expression, r.team);
       c.wins = r.wins;
-      c.team = r.team;
+      if (this.opts.mode === "teams") c.lives = TEAM_LIVES;
       this.scene.add(c.root);
       this.chars.push(c);
       if (r.slot === 0) {
@@ -1357,24 +1373,50 @@ export class Game {
               : `${tag(killer)}${killer.def.emoji} ${killer.name} melempar ${tag(c)}${c.def.emoji} ${c.name} keluar!`
             : `${tag(c)}${c.def.emoji} ${c.name} jatuh sendiri 🤦`
         );
-        if (c.isHuman) this.setBanner(c.humanSlot === 1 ? "KAMU TERSINGKIR!" : "P2 TERSINGKIR!");
+        const outOfLives = this.opts.mode !== "teams" || c.team < 0 || c.lives <= 0;
+        if (!outOfLives) {
+          c.lives--;
+          if (c.lives > 0) {
+            c.parkForRespawn();
+            c.respawnT = 2.8;
+            this.pushFeed(`↩️ ${tag(c)}${c.name} balik lagi! (sisa ${c.lives} nyawa)`);
+            if (c.isHuman) this.setBanner(`KAMU GUGUR! SISA ${c.lives} NYAWA`);
+          } else {
+            this.pushFeed(`☠️ ${tag(c)}${c.name} habis nyawanya!`);
+            if (c.isHuman) this.setBanner(c.humanSlot === 1 ? "KAMU TERSINGKIR!" : "P2 TERSINGKIR!");
+          }
+        } else if (c.isHuman) this.setBanner(c.humanSlot === 1 ? "KAMU TERSINGKIR!" : "P2 TERSINGKIR!");
         sfx.fall();
       }
       if (y < -28) c.removeFromWorld();
+    }
+
+    // team-mode respawns
+    if (this.phase === "playing" && this.opts.mode === "teams") {
+      for (const c of this.chars) {
+        if (c.removed || c.alive || c.respawnT <= 0) continue;
+        c.respawnT -= dt;
+        if (c.respawnT <= 0) {
+          const spot = this.respawnSpot(c.team);
+          const y = this.arena!.surfaceHeight(spot.z) + 0.05;
+          c.respawnAt(spot.x, y, spot.z, Math.atan2(-spot.x, -spot.z));
+          if (c.isHuman) this.setBanner("KAMU BALIK! 💪");
+          sfx.grab();
+        }
+      }
     }
 
     // round end
     if (this.phase === "playing") {
       const alive = this.chars.filter((c) => c.alive);
       if (this.opts.mode === "teams") {
-        // team match: the round ends when a whole team is gone
-        const aliveT = [0, 0];
-        for (const c of alive) if (c.team >= 0) aliveT[c.team]++;
-        if (aliveT[0] === 0 || aliveT[1] === 0) {
+        // team match: the round ends when a team runs out of lives entirely
+        const stocks = teamStocks(this.chars);
+        if (stocks[0] === 0 || stocks[1] === 0) {
           this.phase = "roundEnd";
-          const win: 0 | 1 | null = aliveT[0] > 0 ? 0 : aliveT[1] > 0 ? 1 : null;
+          const win: 0 | 1 | null = stocks[0] > 0 ? 0 : stocks[1] > 0 ? 1 : null;
           if (win !== null) this.teamWins[win]++;
-          const humanWin = win !== null && alive.some((c) => c.isHuman && c.team === win);
+          const humanWin = win !== null && this.chars.some((c) => c.isHuman && c.team === win);
           this.winner = win === null
             ? { name: "Seri", emoji: "🤝", human: false, animal: null, eyeStyle: "default", expression: "default" }
             : { name: win === 0 ? "TIM MERAH" : "TIM BIRU", emoji: win === 0 ? "🟥" : "🟦", human: humanWin, animal: null, eyeStyle: "default", expression: "default", team: win };
@@ -1491,6 +1533,17 @@ export class Game {
     this.camera.lookAt(this.camLook);
   }
 
+  /** A free spot on the respawning cat's own half of the plane. */
+  private respawnSpot(team: number): { x: number; z: number } {
+    const side = team === 0 ? -1 : 1;
+    for (let i = 0; i < 24; i++) {
+      const p = this.arena!.randomSafePoint(0.45);
+      if (p.x * side < 0.25) p.x = side * (0.45 + Math.random() * 1.4);
+      if (this.arena!.isSafe(p.x, p.z, 0.4)) return p;
+    }
+    return { x: side * 0.9, z: 0 };
+  }
+
   emitHud() {
     const me = this.chars.find((c) => c.humanSlot === 1);
     const contest = this.chars.find(c => c.isHuman && c.weaponContest)?.weaponContest;
@@ -1515,11 +1568,13 @@ export class Game {
         slot: c.humanSlot,
         wins: c.wins,
         team: c.team,
+        lives: c.lives,
       })),
       feed: this.feed.map((f) => ({ id: f.id, text: f.text })),
       banner: this.banner?.text ?? null,
       winner: this.winner,
       meAlive: !!me?.alive,
+      respawnIn: me && !me.alive && me.respawnT > 0 ? me.respawnT : null,
       mode: this.opts.mode,
       teamMode: this.opts.mode === "teams",
       teamWins: [this.teamWins[0], this.teamWins[1]],

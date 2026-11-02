@@ -195,6 +195,10 @@ export class Character {
   humanSlot: 0 | 1 | 2;
   /** 0 = red team, 1 = blue team, -1 = free-for-all (no teams) */
   team = -1;
+  /** lives left INCLUDING the current one (teams mode); -1 = no lives system */
+  lives = -1;
+  /** countdown while waiting to respawn (teams mode); <= 0 = not waiting */
+  respawnT = 0;
   world: CANNON.World;
   hooks: CharacterHooks;
 
@@ -212,6 +216,8 @@ export class Character {
   root = new THREE.Group();
   nameTag: THREE.Sprite;
   teamRing: THREE.Mesh | null = null;
+  /** assembled layout of every part around the torso at spawn time */
+  restPose: { body: CANNON.Body; local: CANNON.Vec3; localQ: CANNON.Quaternion }[] = [];
   stars = new THREE.Group();
 
   // state
@@ -333,7 +339,8 @@ export class Character {
     input: ControlState,
     accessory: AccessoryId = "none",
     eyeStyle: EyeStyleId = "default",
-    expression: ExpressionId = "default"
+    expression: ExpressionId = "default",
+    team: number = -1
   ) {
     this.world = world;
     this.index = index;
@@ -342,6 +349,7 @@ export class Character {
     this.name = name;
     this.humanSlot = humanSlot;
     this.isHuman = humanSlot > 0;
+    this.team = team;
     this.hooks = hooks;
     this.facing = yaw;
     this.input = input;
@@ -367,11 +375,23 @@ export class Character {
       ];
     }
     this.buildBodies(spawn, yaw);
+    // Remember the assembled standing layout so respawnAt can restore it
+    // (teleporting the fallen pose with reset orientations interpenetrates
+    // the parts and the contact solver launches the cat like a firework).
+    {
+      const tq = this.torso.quaternion;
+      const tqInv = tq.inverse(new CANNON.Quaternion());
+      this.restPose = this.parts.map((b) => {
+        const local = this.torso.pointToLocalFrame(b.position, new CANNON.Vec3());
+        const localQ = tqInv.mult(b.quaternion, new CANNON.Quaternion());
+        return { body: b, local, localQ };
+      });
+    }
     this.visual = buildCharacterVisual(def, accessory, eyeStyle, expression);
     this.accKind = this.visual.accessoryKind;
     this.root.add(...this.visual.all);
 
-    this.nameTag = makeNameTag(this.isHuman ? (humanSlot === 1 ? "KAMU" : "P2") : name, this.isHuman, humanSlot);
+    this.nameTag = makeNameTag(this.isHuman ? (humanSlot === 1 ? "KAMU" : "P2") : name, this.isHuman, humanSlot, team);
     this.root.add(this.nameTag);
 
     // team ring painted on the deck under the cat (team matches only)
@@ -509,7 +529,7 @@ export class Character {
 
   /** Called once per rendered frame: handles button presses. */
   frameActions(dt: number) {
-    if (!this.alive && this.removed) return;
+    if (!this.alive) return; // eliminated cats take no input at all (also while parked waiting to respawn)
     const inp = this.input;
     this.time += dt;
     this.updateLook(dt);
@@ -2469,6 +2489,59 @@ export class Character {
     }
   }
 
+  /** Freeze below the deck while waiting to respawn (teams mode). */
+  parkForRespawn() {
+    for (const b of this.parts) {
+      b.type = CANNON.Body.STATIC;
+      b.velocity.setZero();
+      b.angularVelocity.setZero();
+      if (b.position.y > -8) b.position.y = -8;
+    }
+    this.alive = false;
+    this.root.visible = false;
+    this.stars.visible = false;
+  }
+
+  /** Come back to life at a spot on the deck with a fresh body state. */
+  respawnAt(x: number, y: number, z: number, yaw: number) {
+    for (const r of this.restPose) r.body.type = CANNON.Body.DYNAMIC;
+    // the hover spring holds the torso HOVER above the deck; spawning lower
+    // makes it fire one huge corrective kick (the cat pops like a cork)
+    this.torso.position.set(x, y + HOVER, z);
+    this.torso.quaternion.setFromAxisAngle(new CANNON.Vec3(0, 1, 0), yaw);
+    // NOTE: cannon's pointToWorldFrame clobbers `this.position` when the
+    // result aliases it, so every write goes through scratch vectors.
+    const wp = new CANNON.Vec3();
+    const wq = new CANNON.Quaternion();
+    for (const r of this.restPose) {
+      const b = r.body;
+      this.torso.pointToWorldFrame(r.local, wp);
+      b.position.copy(wp);
+      this.torso.quaternion.mult(r.localQ, wq);
+      b.quaternion.copy(wq);
+      b.velocity.setZero();
+      b.angularVelocity.setZero();
+      b.force.setZero();
+      b.wakeUp();
+    }
+    this.facing = yaw;
+    this.alive = true;
+    this.koTimer = 0;
+    this.dizzy = 0;
+    this.hurtT = 0;
+    this.punchTimer = 0;
+    this.swingTimer = 0;
+    this.dropkickTimer = 0;
+    this.headbuttTimer = 0;
+    this.respawnT = 0;
+    this.walkPhase = 0;
+    this.squash = 0;
+    this.squashV = 0;
+    this.releaseAll(false);
+    this.stars.visible = false;
+    this.root.visible = true;
+  }
+
   removeFromWorld() {
     if (this.removed) return;
     this.cancelWeaponContest();
@@ -2483,11 +2556,11 @@ export class Character {
 
 function makeTeamRing(team: number) {
   if (team < 0) return null;
-  const geo = new THREE.RingGeometry(0.34, 0.5, 40);
+  const geo = new THREE.RingGeometry(0.36, 0.58, 44);
   const mat = new THREE.MeshBasicMaterial({
     color: team === 0 ? 0xe8343c : 0x2f6fe0,
     transparent: true,
-    opacity: 0.62,
+    opacity: 0.85,
     depthWrite: false,
     side: THREE.DoubleSide,
   });
@@ -2497,7 +2570,7 @@ function makeTeamRing(team: number) {
   return ring;
 }
 
-function makeNameTag(text: string, human: boolean, slot: number) {
+function makeNameTag(text: string, human: boolean, slot: number, team = -1) {
   const c = document.createElement("canvas");
   c.width = 256;
   c.height = 64;
@@ -2508,7 +2581,10 @@ function makeNameTag(text: string, human: boolean, slot: number) {
   g.lineWidth = 6;
   g.strokeStyle = "rgba(0,0,0,0.55)";
   g.strokeText(text, 128, 34);
-  g.fillStyle = human ? (slot === 1 ? "#ffd23f" : "#6ee7ff") : "#ffffff";
+  // team matches dye the name so you can tell friend from foe at a glance
+  g.fillStyle = human
+    ? slot === 1 ? "#ffd23f" : "#6ee7ff"
+    : team < 0 ? "#ffffff" : team === 0 ? "#ff9c9c" : "#93c2ff";
   g.fillText(text, 128, 34);
   const tex = new THREE.CanvasTexture(c);
   tex.colorSpace = THREE.SRGBColorSpace;
