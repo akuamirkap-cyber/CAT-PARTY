@@ -95,7 +95,7 @@ export const ASSET_LIMB = {
   /** how much the shin narrows at the ankle (1 = no taper) */
   ankle: 1.04,
   /** foot half-width / half-depth / half-height multipliers */
-  footW: 1.14,
+  footW: 1.04,
   footD: 1.22,
   footH: 1.26,
   /** forward offset of the foot (the paw points at the camera) */
@@ -103,7 +103,9 @@ export const ASSET_LIMB = {
   /** softness of the ankle -> paw transition (bigger = smoother boot) */
   footBlend: 0.085,
   /** the sculpt's legs sit a little outside the hip pivot (x of the shin) */
-  legOut: 0.028,
+  legOut: 0.030,
+  /** extra outward offset of the paw itself (the sculpt's feet stand apart) */
+  footOut: 0.012,
   /** how wide the hanging arms sit in the idle pose (asset arms hang close) */
   armSpread: 0.05,
 };
@@ -117,6 +119,8 @@ const LY = (y: number) => rig.LIMB_TOP[1] + (y - rig.LIMB_TOP[1]) * TU.legH;
 const figureFootOffset = () => isSculptedShape() ? 0.1 * (0.7 + 0.3 * TU.legTip) * 0.22 + 0.035 : 0;
 /** outward offset of the sculpted leg columns in leg-local space */
 const LEG_OUT = () => (isSculptedShape() ? ASSET_LIMB.legOut : 0);
+/** outward offset of the sculpted paw (slightly wider stance than the shin) */
+const FOOT_OUT = () => LEG_OUT() + (isSculptedShape() ? ASSET_LIMB.footOut : 0);
 /** vertical radius of the sculpted paw */
 const footRY = () => 0.125 * TU.legTip * ASSET_LIMB.footH;
 /** the floor line expressed in leg-local coordinates */
@@ -612,7 +616,7 @@ class Cat {
         // ankle crease visible.
         // Smooth plump paw that melts into the shin (the ground cut flattens the
         // sole), so the leg reads as one soft boot like the asset's.
-        this.add(ell(l, B(l, [LEG_OUT(), footCenterY(), FOOT_FWD()]), [
+        this.add(ell(l, B(l, [FOOT_OUT(), footCenterY(), FOOT_FWD()]), [
           0.156 * lt * ASSET_LIMB.footW,
           0.125 * lt * ASSET_LIMB.footH,
           0.212 * lt * ASSET_LIMB.footD,
@@ -673,7 +677,7 @@ class Cat {
     for (const a of ["armL", "armR"] as const) this.paint(ell("torso", B(a, [0, PAW() - 0.025 * at, 0.0]), [0.17 * at, 0.13 * at, 0.17 * at]), col, soft);
     for (const l of ["legL", "legR"] as const) {
       if (isSculptedShape()) {
-        this.paint(ell("torso", B(l, [LEG_OUT(), footCenterY() + 0.01, FOOT_FWD() + 0.02]), [
+        this.paint(ell("torso", B(l, [FOOT_OUT(), footCenterY() + 0.01, FOOT_FWD() + 0.02]), [
           0.156 * lt * ASSET_LIMB.footW * 1.16,
           footRY() * 1.25,
           0.212 * lt * ASSET_LIMB.footD * 1.1,
@@ -695,7 +699,7 @@ class Cat {
           // Deep in z so the paw surface always passes through the shape, thin
           // in x and tall in y: the trace on the paw is one clean crease.
           this.paint(
-            ell("torso", B(l, [LEG_OUT() + dx * lt, footCenterY() + 0.20 * footRY(), FOOT_FWD()]),
+            ell("torso", B(l, [FOOT_OUT() + dx * lt, footCenterY() + 0.20 * footRY(), FOOT_FWD()]),
               [0.012, 0.085, 0.2]),
             col, 0.008,
           );
@@ -807,17 +811,17 @@ class Cat {
       this.stroke(pts, r0, r1, stripe, soft);
     };
     for (const ay of [1.15, 0.995, 0.84, 0.69, 0.545]) {
-      // Start at ~74° from the front. The exported cat's flank mask begins at
-      // |angle| 1.32 rad; anything closer to the front laid the stripe ends
-      // right on the belly rim and they read as dark specks in the white.
-      for (const s of [1, -1] as const) ring(SY(ay), 74, 150, s, 0.018, 0.026, 0.012);
+      // Start just behind the belly rim. The patch is narrower now (0.203 of
+      // the body), so the rings have orange room to wrap further forward, like
+      // the sculpt's flank stripes that peek around the white patch.
+      for (const s of [1, -1] as const) ring(SY(ay), 63, 152, s, 0.021, 0.028, 0.014);
     }
     this.stroke([this.bodyAt(180, SY(0.62)), this.bodyAt(180, SY(0.95)), this.bodyAt(180, SY(1.28))], 0.017, 0.013, stripe, soft);
     // ── arms: three rings on the upper arm (asset t .2 / .365 / .53) ──
     const armAt = (t: number) => AY(0.15 - 0.355 * t);
     for (const a of ["armL", "armR"] as const) {
       for (const t of [0.2, 0.365, 0.53]) {
-        this.paint(slab(B(a, [0, armAt(t), 0]), Bdir(a, [0, 1, 0]), 0.021, 0.16), stripe, 0.009);
+        this.paint(slab(B(a, [0, armAt(t), 0]), Bdir(a, [0, 1, 0]), 0.021, 0.16), stripe, 0.011);
       }
     }
     // ── legs: two rings just above the sock ──
@@ -841,13 +845,18 @@ class Cat {
     // Asset mask: ellipse 0.318 x 0.376 in x/y, everything in front of z 0.1.
     // Using the same construction keeps a crisp edge on the flanks, where a
     // z-banded patch smeared into the stripes.
-    this.paint(frontColumn("torso", 0, ty(-0.03), 0.085, 0.27, 0.222), white, 0.011, 1, PI.torso);
+    // Asset belly: a tall, narrow egg (half-width 0.235 vs half-height 0.257)
+    // that leaves a thick orange margin on both flanks. The old patch was wider
+    // than tall, so it filled the whole front and touched the arms.
+    this.paint(frontColumn("torso", 0, ty(-0.041), 0.085, 0.203, 0.252), white, 0.011, 1, PI.torso);
     // Fluffy rim: a ring of small soft blobs wobbles the outline the way the
     // sculpt's noise mask does, so the patch reads as fur, not a sticker.
-    for (let i = 0; i < 22; i++) {
-      const a = (i / 22) * Math.PI * 2;
-      const jx = 0.93 + 0.05 * Math.sin(i * 3.1), jy = 0.93 + 0.05 * Math.cos(i * 2.3);
-      this.paint(frontColumn("torso", Math.cos(a) * 0.27 * jx, ty(-0.03) + Math.sin(a) * 0.222 * jy, 0.085, 0.042, 0.038), white, 0.02, 1, PI.torso);
+    // Low-frequency wobble instead of per-blob jitter: the sculpt's edge is
+    // fur-soft, not sawtoothed.
+    for (let i = 0; i < 30; i++) {
+      const a = (i / 30) * Math.PI * 2;
+      const wob = 1 + 0.035 * Math.sin(a * 3 + 0.7) + 0.02 * Math.sin(a * 5 + 2.1);
+      this.paint(frontColumn("torso", Math.cos(a) * 0.213 * wob, ty(-0.045) + Math.sin(a) * 0.257 * wob, 0.085, 0.03, 0.028), white, 0.016, 1, PI.torso);
     }
     // ── white mittens and socks: a clean cuff line, like the asset's
     //    "armT > 0.73" / "y < 0.268" colour masks ──
@@ -1363,11 +1372,11 @@ function getAsset(def: AnimalDef, noEars = false): Asset {
   // fill that gap, which is why the game cat had no notch between the legs.
   const assetShape = getShapeMode() === "asset";
   const notch = assetShape
-    ? cone("torso", [0, -0.30, 0.005], [0, -0.80, 0.005], 0.022, 0.062, 0.02)
+    ? cone("torso", [0, -0.345, 0.005], [0, -0.80, 0.005], 0.03, 0.066, 0.02)
     : null;
   const sdf = (x: number, y: number, z: number) => {
     let d = sceneDist(shapes, x, y, z);
-    if (notch && !rigid && y < -0.22 && Math.abs(x) < 0.16) {
+    if (notch && !rigid && y < -0.30 && Math.abs(x) < 0.16) {
       d = -smin(-d, shapeDist(notch, x, y, z), 0.03);
     }
     if (figure && !rigid) {

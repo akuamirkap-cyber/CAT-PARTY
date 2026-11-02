@@ -75,7 +75,9 @@ export function selfVolumes(t: Tuning = getRigTuning()) {
   // the paw clearance so the mesh and the physics always agree.
   const slim = isSculptedShape() ? (getShapeMode() === "asset" ? ASSET_SLIM : 1) : 1;
   const torso: Ell[] = isSculptedShape() ? [
-    { c: [0, -0.18 * h, 0], r: [0.4 * bb * slim, 0.42 * h * (0.7 + 0.3 * bb), 0.33 * bb * slim] },
+    // The sculpt's lower body tapers smoothly into the hips instead of bulging
+    // out over the legs, so the pelvis volume sits a little higher and slimmer.
+    { c: [0, -0.145 * h, 0], r: [0.358 * bb * slim, 0.385 * h * (0.7 + 0.3 * bb), 0.33 * bb * slim] },
     { c: [0, 0.10 * h, -0.015], r: [0.38 * bt * slim, 0.50 * h * (0.75 + 0.25 * bt), 0.27 * (0.55 + 0.45 * bt) * slim] },
     { c: [0, -0.10 * h, 0.055 + 0.07 * (fat - 1)], r: [0.31 * bb * (0.85 + 0.15 * fat) * slim, 0.38 * h * (0.85 + 0.15 * fat), 0.26 * fat * slim] },
   ] : [
