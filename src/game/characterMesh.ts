@@ -2097,7 +2097,8 @@ function buildEye(rec: Recipe, side: 1 | -1, hs: Shape[], eyesNormal: THREE.Grou
     const R = 0.205 * z;
     addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, R + 0.014 * z, R * 1.02 + 0.014 * z, 48)), 0x2b2733, 0, 0.3));
     addTo(eyeContent, decal(fr, polyTris(ellipse(0, 0, R, R * 1.02, 48)), 0x0c0a10, 1, 0.2));
-    const pg = pupilGroup(eyeContent, fr, 0, 0);
+    // a small gaze range so the catchlights track like every other eye
+    const pg = pupilGroup(eyeContent, fr, R * 0.16, R * 0.12);
     addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(side * R * 0.34, R * 0.42, R * 0.30, R * 0.34, 22)), 0xffffff, 2, 0.15));
     addTo(pg, pupilDecal(pg, fr, polyTris(ellipse(side * R * 0.12, -R * 0.42, R * 0.10, R * 0.11, 14)), 0xffffff, 3, 0.15));
     koSize = 0.13 * z;
