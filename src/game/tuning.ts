@@ -26,7 +26,7 @@ export interface Tuning {
 
 // Default look = the values chosen by the player in the shape editor.
 export const TUNING_DEFAULTS: Tuning = {
-  head: 0.74,
+  head: 0.745,
   neck: 0.105,
   eyeSize: 1.16,
   eyeX: 1.17,
@@ -38,8 +38,8 @@ export const TUNING_DEFAULTS: Tuning = {
   bodyBottom: 0.7,
   armRoot: 1.35,
   armTip: 0.81,
-  legRoot: 0.94,
-  legTip: 0.74,
+  legRoot: 0.77,
+  legTip: 0.70,
   armLen: 0.96,
   bodyH: 0.59,
   belly: 0.75,
@@ -80,7 +80,45 @@ export const TUNING_SPECS: TuningSpec[] = [
   { key: "legTip", label: "Ujung kaki", min: 0.7, max: 1.5, step: 0.01, group: "Tangan & Kaki" },
 ];
 
-const STORAGE = "meowbrawl.tuning.v5";
+const STORAGE = "meowbrawl.tuning.v6";
+const PREVIOUS_STORAGE = "meowbrawl.tuning.v5";
+const SHAPE_STORAGE = "meowbrawl.shapeMode.v2";
+export type ShapeMode = "classic" | "figure" | "asset";
+function loadShapeMode(): ShapeMode {
+  try {
+    const raw = typeof localStorage !== "undefined" ? localStorage.getItem(SHAPE_STORAGE) : null;
+    return raw === "classic" || raw === "figure" || raw === "asset" ? raw : "asset";
+  } catch { return "asset"; }
+}
+
+/**
+ * Proportions traced from the "accurate 3D cat" asset
+ * (create-3d-asset-without-hat): big round head, narrow chest over wide hips,
+ * thick arms hanging beside the belly, short chunky legs and big paws.
+ * The asset is a static sculpt, so the rig keeps these as ordinary slider
+ * values — walking, punches and the ragdoll work exactly as before.
+ */
+export const ASSET_TUNING: Tuning = {
+  ...TUNING_DEFAULTS,
+  head: 0.85,
+  neck: 0.14,
+  jaw: 0.82,
+  ear: 1.08,
+  // The barrel is noticeably slimmer than the plush pear: measured against the
+  // exported sculpt the flank has to sit ~10% inside, otherwise the hanging
+  // arms merge into the body silhouette and the mitten reads as a white blob
+  // stuck on the belly instead of a paw beside it.
+  bodyTop: 0.58,
+  bodyBottom: 0.76,
+  belly: 0.72,
+  armRoot: 1.4,
+  armTip: 0.85,
+  armLen: 1.0,
+  legRoot: 0.87,
+  legTip: 0.78,
+  legH: 0.86,
+};
+let shapeMode: ShapeMode = loadShapeMode();
 let current: Tuning = load();
 const listeners = new Set<() => void>();
 
@@ -88,6 +126,14 @@ function load(): Tuning {
   try {
     const raw = typeof localStorage !== "undefined" ? localStorage.getItem(STORAGE) : null;
     if (raw) return { ...TUNING_DEFAULTS, ...JSON.parse(raw) };
+    // Carry earlier custom proportions forward once, while applying the newly
+    // requested 77%/70% leg sizes even for existing players.
+    const old = typeof localStorage !== "undefined" ? localStorage.getItem(PREVIOUS_STORAGE) : null;
+    if (old) {
+      const migrated = { ...TUNING_DEFAULTS, ...JSON.parse(old), legRoot: 0.77, legTip: 0.70 };
+      localStorage.setItem(STORAGE, JSON.stringify(migrated));
+      return migrated;
+    }
   } catch {
     /* ignore */
   }
@@ -95,8 +141,52 @@ function load(): Tuning {
 }
 
 export const getTuning = () => current;
+export const getShapeMode = () => shapeMode;
+/** The sculpted (smooth, figurine-like) surface shared by "figure" and "asset". */
+export const isSculptedShape = () => shapeMode === "figure" || shapeMode === "asset";
+// Shape mode is a reversible geometry transform, not a destructive slider preset.
+// In particular, all face/eye settings and the user's custom proportions survive.
+let effectiveSource: Tuning | null = null;
+let effectiveMode: ShapeMode | null = null;
+let effective: Tuning = current;
+export function getRigTuning(): Tuning {
+  if (effectiveSource !== current || effectiveMode !== shapeMode) {
+    effectiveSource = current;
+    effectiveMode = shapeMode;
+    if (shapeMode === "figure") {
+      effective = {
+        ...current,
+        bodyTop: current.bodyTop * 1.24,
+        bodyBottom: current.bodyBottom * 1.25,
+        bodyH: current.bodyH * 1.10,
+        legH: current.legH * 0.86,
+        armTip: current.armTip * 1.08,
+      };
+    } else if (shapeMode === "asset") {
+      // Asset baseline, plus whatever the player changed in the shape editor.
+      const next: Tuning = { ...current };
+      for (const key of Object.keys(ASSET_TUNING) as (keyof Tuning)[]) {
+        next[key] = ASSET_TUNING[key] + (current[key] - TUNING_DEFAULTS[key]);
+      }
+      effective = next;
+    } else {
+      effective = current;
+    }
+  }
+  return effective;
+}
 export const tuningKey = (t: Tuning = current) =>
-  (Object.keys(TUNING_DEFAULTS) as (keyof Tuning)[]).map((k) => t[k].toFixed(3)).join("|");
+  `${shapeMode}|` + (Object.keys(TUNING_DEFAULTS) as (keyof Tuning)[]).map((k) => t[k].toFixed(3)).join("|");
+
+export function setShapeMode(mode: ShapeMode) {
+  if (mode === shapeMode) return;
+  shapeMode = mode;
+  try { localStorage.setItem(SHAPE_STORAGE, mode); } catch { /* storage is optional */ }
+  // A fresh snapshot makes both shape and existing tuning subscribers update.
+  current = { ...current };
+  listeners.forEach((l) => l());
+}
+export const useShapeMode = () => useSyncExternalStore(subscribeTuning, getShapeMode);
 
 export function setTuning(patch: Partial<Tuning>) {
   current = { ...current, ...patch };

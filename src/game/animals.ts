@@ -9,7 +9,8 @@ export type AnimalId =
   | "garong"
   | "mendung"
   | "oreo"
-  | "moka";
+  | "moka"
+  | "jambul";
 
 export interface AnimalDef {
   id: AnimalId;
@@ -32,6 +33,7 @@ export const ANIMALS: AnimalDef[] = [
   { id: "mendung", name: "Mendung", emoji: "🐈‍⬛", tagline: "Kalem tapi bahaya 😶", ui: "#d9cfc6" },
   { id: "oreo", name: "Oreo", emoji: "🐈‍⬛", tagline: "Imut maksimal 🥺", ui: "#f4b8cc" },
   { id: "moka", name: "Moka", emoji: "🐱", tagline: "Gemoy pemalu 🌸", ui: "#f7c6d4" },
+  { id: "jambul", name: "Jambul", emoji: "🧸", tagline: "Bulu piatu berjongkok 🧡", ui: "#2a8f86" },
 ];
 
 export const animalById = (id: AnimalId) => ANIMALS.find((a) => a.id === id) ?? ANIMALS[0];
@@ -49,13 +51,34 @@ export const BOT_NAMES = [
   "Si Tengil",
 ];
 
-export type AccessoryId = "none" | "capRed" | "capBlue" | "capNewRed" | "capNewBlue" | "dolit" | "helmet";
+export type AccessoryId =
+  | "none" | "capRed" | "capBlue" | "capNewRed" | "capNewBlue" | "dolit" | "helmet" | "crown" | "shades"
+  | "cowboy" | "afro" | "nerd" | "detective" | "clownnose" | "jason"
+  | "belt" | "boxers" | "duckfloat" | "broom" | "gloves" | "sandal"
+  | "classic" | "cool" | "pixel" | "collar" | "mallet";
 export const ACCESSORIES: { id: AccessoryId; name: string; icon: string }[] = [
   { id: "none", name: "Polos", icon: "🚫" },
   { id: "capNewRed", name: "Topi Baseball Merah", icon: "🧢" },
   { id: "capNewBlue", name: "Topi Baseball Biru", icon: "🧢" },
-  { id: "capRed", name: "Topi Lawas Merah", icon: "🧢" },
-  { id: "capBlue", name: "Topi Lawas Biru", icon: "🧢" },
   { id: "dolit", name: "Paman Dolit", icon: "🥸" },
   { id: "helmet", name: "Helm Fullface", icon: "⛑️" },
+  { id: "crown", name: "Mahkota Raja", icon: "👑" },
+  { id: "shades", name: "Kacamata Keren", icon: "🕶️" },
+  { id: "cowboy", name: "Topi Koboi", icon: "🤠" },
+  { id: "afro", name: "Afro Pelangi", icon: "🌈" },
+  { id: "nerd", name: "Kacamata Nerds", icon: "🤓" },
+  { id: "detective", name: "Kacamata Detektif", icon: "🕵️" },
+  { id: "clownnose", name: "Hidung Badut", icon: "🤡" },
+  { id: "jason", name: "Topeng Hockey", icon: "🥷" },
+  { id: "belt", name: "Sabuk Juara", icon: "🏅" },
+  { id: "boxers", name: "Celana Tinju", icon: "🩳" },
+  { id: "duckfloat", name: "Pelampung Bebek", icon: "🦆" },
+  { id: "broom", name: "Sapu Punggung", icon: "🧹" },
+  { id: "gloves", name: "Sarung Tinju", icon: "🧤" },
+  { id: "sandal", name: "Sandal Jepit", icon: "🩴" },
+  { id: "classic", name: "Kacamata Klasik", icon: "🕶️" },
+  { id: "cool", name: "Kacamata Wayfarer", icon: "😎" },
+  { id: "pixel", name: "Kacamata Pixel", icon: "🕹️" },
+  { id: "collar", name: "Kalung Lonceng", icon: "🔔" },
+  { id: "mallet", name: "Palu Kayu", icon: "🔨" },
 ];

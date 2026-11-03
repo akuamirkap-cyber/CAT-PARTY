@@ -1,12 +1,64 @@
 import * as CANNON from "cannon-es";
 import * as THREE from "three";
+import { mergeGeometries, mergeVertices } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 import { mat } from "./characterMesh";
 import type { Bat } from "./Character";
 
-export const TILE = 2.2;
+export const PLANE_SCALE = 1.8;
+export const TILE = 2.2 * PLANE_SCALE;
 export const GRID = 7;
 export const HALF = (TILE * GRID) / 2;
 const THICK = 1.2;
+// A shallow crowned fuselage blends into the wings. The collider below follows
+// the same profile so feet and dropped items stay on the visible surface.
+function deckHeight(z: number) {
+  const t = Math.min(1, Math.abs(z) / 3.4);
+  return 0.08 - 0.64 * t * t * (3 - 2 * t);
+}
+// The airplane outline is shared by rendering, collision, and bot navigation.
+// +X is the nose. The fuselage has rounded ends and the wings sweep back into
+// softly rounded tips instead of ending in rectangular slabs.
+function planeLimits(z: number): [number, number] {
+  const a = Math.abs(z);
+  if (a <= 3.5) {
+    const tail = Math.min(a / 2, 1);
+    const nose = a / 3.5;
+    return [-8 + 2.5 * tail * tail, 7.5 - 4 * nose * nose];
+  }
+  const w = Math.min(a - 3.5, 4.2);
+  const back = -2 + 0.10 * w;
+  const front = 3.5 - 0.75 * w;
+  const rounding = a <= 6.9 ? 1 : Math.sqrt(Math.max(0, 1 - ((a - 6.9) / 0.8) ** 2));
+  const middle = (back + front) / 2;
+  const half = (front - back) * 0.5 * rounding;
+  return [middle - half, middle + half];
+}
+
+function panelSpan(cx: number, hx: number, z: number): [number, number] {
+  const [min, max] = planeLimits(z);
+  const left = Math.max(cx - hx, min);
+  const right = Math.min(cx + hx, max);
+  // A panel can taper to nothing at its outer edge.
+  const collapsed = THREE.MathUtils.clamp((left + right) / 2, cx - hx, cx + hx);
+  return left <= right ? [left, right] : [collapsed, collapsed];
+}
+
+// A plump belly narrows toward the nose and tail. Every section falls with
+// its matching collider rather than leaving a static, intangible shell.
+function hullBottom(x: number, z: number) {
+  const tailBlend = THREE.MathUtils.clamp((-x - 2) / 1, 0, 1);
+  const r = Math.abs(z) / (3.15 - tailBlend * 1.15);
+  let taper = 1;
+  if (x > 4.2) taper = Math.sqrt(Math.max(0, 1 - ((x - 4.2) / 3.3) ** 2));
+  if (x < -5) taper = Math.sqrt(Math.max(0, 1 - ((x + 5) / 3) ** 2));
+  const belly = r < 1 ? 2.55 * Math.sqrt(1 - r * r) * taper : 0;
+  // The cross-section closes into the outline instead of ending in a tall,
+  // vertical wall. This rounds the nose, tail and wing ends from below.
+  const [left, right] = planeLimits(z);
+  const edge = Math.max(0, Math.min(x - left, right - x, 7.7 - Math.abs(z)));
+  const round = THREE.MathUtils.smoothstep(edge, 0, 1.15);
+  return deckHeight(z) - (0.09 + (0.61 + belly) * round);
+}
 
 interface Tile {
   body: CANNON.Body;
@@ -25,9 +77,6 @@ interface DeckChunk {
   mesh: THREE.Group;
   edge: THREE.LineSegments;
   tile: Tile;
-  vel: number;
-  angVel: THREE.Vector3;
-  active: boolean;
 }
 
 // world span of the shared hull livery texture (covers the whole plane top)
@@ -48,8 +97,8 @@ export class Arena {
   bodies: CANNON.Body[] = [];
   groundMat: CANNON.Material;
   ringsDropped = new Set<number>();
-  plane: THREE.Group | null = null;
   tFly = 0;
+  private animated: THREE.Object3D[] = [];
 
   constructor(world: CANNON.World, scene: THREE.Scene, groundMat: CANNON.Material) {
     this.world = world;
@@ -78,7 +127,35 @@ export class Arena {
       name: string
     ) => {
       const body = new CANNON.Body({ mass: 0, type: CANNON.Body.KINEMATIC, material: this.groundMat });
-      body.addShape(new CANNON.Box(new CANNON.Vec3(hx, THICK / 2, hz)));
+      // Closely spaced strips follow the same swept outline as the visible
+      // skin. Each end's maximum extent covers the rendered edge too.
+      const strips = Math.max(1, Math.ceil((hz * 2) / 0.38));
+      const stripWidth = hz * 2 / strips;
+      for (let i = 0; i < strips; i++) {
+        const z = -hz + (i + 0.5) * stripWidth;
+        const worldZ = cz + z;
+        const spans = [panelSpan(cx, hx, worldZ - stripWidth / 2), panelSpan(cx, hx, worldZ), panelSpan(cx, hx, worldZ + stripWidth / 2)];
+        const left = Math.min(...spans.map(span => span[0]));
+        const right = Math.max(...spans.map(span => span[1]));
+        if (right - left < 0.002) continue;
+        const top = deckHeight(worldZ);
+        const slices = name.startsWith("nose") || name === "tail-tip" ? 2 : 1;
+        for (let j = 0; j < slices; j++) {
+          const x0 = left + (right - left) * j / slices;
+          const x1 = left + (right - left) * (j + 1) / slices;
+          const x = (x0 + x1) / 2;
+          // Enclose the rounded underside over the whole strip, including
+          // the deeper edges, so the visible fuselage remains solid.
+          const bottom = Math.min(
+            hullBottom(x0, worldZ), hullBottom(x, worldZ), hullBottom(x1, worldZ),
+            hullBottom(x, worldZ - stripWidth / 2), hullBottom(x, worldZ + stripWidth / 2),
+          ) - 0.10; // conservative enclosure between samples on the curved belly
+          body.addShape(
+            new CANNON.Box(new CANNON.Vec3((x1 - x0) / 2 + 0.055, (top - bottom) / 2, stripWidth / 2 + 0.055)),
+            new CANNON.Vec3(x - cx, (top + bottom) / 2 + THICK / 2, z),
+          );
+        }
+      }
       body.position.set(cx, -THICK / 2, cz);
       this.addBody(body);
       this.tiles.push({ body, index: this.tiles.length, ring, state: "solid", timer: 0, baseX: cx, baseZ: cz, name, hx, hz });
@@ -106,10 +183,6 @@ export class Arena {
     //  BIG CARTOON AIRPLANE — its own hull IS the play surface.
     //  No separate deck: the cream top you stand on is the fuselage back.
     // ============================================================
-    const plane = new THREE.Group();
-    this.plane = plane;
-    this.group.add(plane);
-    const cream = mat(0xf6f1e6, 0.55);
     const creamDark = mat(0xe6dfcf, 0.6);
     const red = mat(0xe84a4a, 0.5);
     const steel = mat(0x8fa3b8, 0.4);
@@ -120,8 +193,8 @@ export class Arena {
     const hullTex = hullTopTexture();
     const hullMat = new THREE.MeshStandardMaterial({ map: hullTex, roughness: 0.58, metalness: 0.12 });
     for (const t of this.tiles) {
-      // wedge-shaped chunk in the panel's local frame, top surface exactly at y=0.02
-      const geo = buildPanelGeometry(t);
+      // A curved chunk follows the same shallow profile as its physics strips.
+      const geo = buildPanelGeometry(t, this.tiles);
       // world-space UVs into the shared livery so paint is seamless across chunks
       const pos = geo.getAttribute("position");
       const uv = new Float32Array(pos.count * 2);
@@ -132,7 +205,9 @@ export class Arena {
       geo.setAttribute("uv", new THREE.BufferAttribute(uv, 2));
       const chunk = new THREE.Group();
       const skin = new THREE.Mesh(geo, hullMat);
-      skin.castShadow = true;
+      // The plane has no receiver underneath it. Characters and details still
+      // cast their shadows onto the hull, without re-rendering its dense skin.
+      skin.castShadow = false;
       skin.receiveShadow = true;
       chunk.add(skin);
       // red glowing crack edge = warning that this section is about to break
@@ -144,238 +219,172 @@ export class Arena {
       chunk.add(edge);
       chunk.position.set(t.baseX, 0, t.baseZ);
       this.group.add(chunk);
-      this.chunks.push({ mesh: chunk, edge, tile: t, vel: 0, angVel: new THREE.Vector3(), active: false });
+      this.chunks.push({ mesh: chunk, edge, tile: t });
     }
 
-    // ---- fuselage belly under the walkable panels ----
-    const bodyShape = roundedRectShapeWH(8.3, 3.1, 2.2);
-    const bodyGeo = new THREE.ExtrudeGeometry(bodyShape, {
-      depth: 3.4,
-      bevelEnabled: true,
-      bevelSize: 0.6,
-      bevelThickness: 0.5,
-      bevelSegments: 4,
-      curveSegments: 32,
-    });
-    bodyGeo.rotateX(-Math.PI / 2);
-    bodyGeo.computeBoundingBox();
-    bodyGeo.translate(0, -0.55 - bodyGeo.boundingBox!.max.y, 0);
-    const airBody = new THREE.Mesh(bodyGeo, cream);
-    airBody.castShadow = true;
-    airBody.receiveShadow = true;
-    plane.add(airBody);
-    // red cheatline + white pinstripe hugging the fuselage sides
-    for (const sz of [1, -1]) {
-      for (const [y, hh, matl] of [
-        [-2.6, 0.42, red],
-        [-2.15, 0.12, mat(0xffffff, 0.5)],
-      ] as const) {
-        const line = new THREE.Mesh(new THREE.BoxGeometry(13.5, hh, 0.1), matl);
-        line.position.set(-0.3, y, sz * 3.35);
-        plane.add(line);
+    // Decorative details are anchored to the same breakable physics bodies.
+    // Nothing that looks like an airplane surface extends beyond the colliders.
+    const anchor = (name: string) => {
+      const chunk = this.chunks.find((ch) => ch.tile.name === name)!;
+      const detail = new THREE.Group();
+      detail.position.set(-chunk.tile.baseX, 0, -chunk.tile.baseZ);
+      chunk.mesh.add(detail);
+      return { detail, tile: chunk.tile };
+    };
+    const addCollider = (tile: Tile, center: CANNON.Vec3, half: CANNON.Vec3) => {
+      tile.body.addShape(new CANNON.Box(half), new CANNON.Vec3(center.x - tile.baseX, center.y + THICK / 2, center.z - tile.baseZ));
+    };
+
+    // Low, rounded cockpit sits on the nose rather than floating beyond it.
+    const nose = anchor("noseC");
+    const canopy = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 24), glass);
+    canopy.scale.set(1.15, 0.72, 0.9);
+    canopy.position.set(6.15, 0.12, 0);
+    canopy.castShadow = true;
+    const canopyRim = new THREE.Mesh(new THREE.SphereGeometry(1, 40, 24), creamDark);
+    canopyRim.scale.set(1.16, 0.17, 0.95);
+    canopyRim.position.set(6.15, 0.11, 0);
+    nose.detail.add(canopyRim, canopy);
+    // A solid enclosure for the entire visible canopy: it moves and falls
+    // together with the nose panel and cannot be walked through.
+    addCollider(nose.tile, new CANNON.Vec3(6.15, 0.38, 0), new CANNON.Vec3(1.15, 0.48, 0.9));
+    for (const z of [-0.32, 0.32]) {
+      const points: THREE.Vector3[] = [];
+      const r = Math.sqrt(1 - (z / 0.9) ** 2);
+      for (let k = 0; k <= 24; k++) {
+        const angle = Math.PI * k / 24;
+        points.push(new THREE.Vector3(6.15 + 1.17 * r * Math.cos(angle), 0.12 + 0.74 * r * Math.sin(angle), z));
       }
+      nose.detail.add(new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 32, 0.022, 10), creamDark));
     }
-    // side windows
-    const winMat = new THREE.MeshBasicMaterial({ color: 0xbfe9ff });
-    const winGeo = new THREE.BoxGeometry(1.05, 0.72, 0.16);
+    // Small rounded red nose badge, flush with the walkable nose.
+    const noseBadge = new THREE.Mesh(new THREE.SphereGeometry(1, 24, 16), red);
+    noseBadge.scale.set(0.23, 0.15, 0.32);
+    noseBadge.position.set(7.06, -0.12, 0);
+    nose.detail.add(noseBadge);
+
+    const tail = anchor("tail-tip");
+    const finShape = new THREE.Shape();
+    finShape.moveTo(-7.8, -0.05);
+    finShape.quadraticCurveTo(-7.85, 0.2, -7.65, 0.45);
+    finShape.lineTo(-7.25, 1.25);
+    finShape.quadraticCurveTo(-7.15, 1.55, -6.8, 1.55);
+    finShape.lineTo(-6.55, 1.55);
+    finShape.quadraticCurveTo(-6.3, 1.55, -6.2, 1.25);
+    finShape.lineTo(-5.65, -0.05);
+    finShape.closePath();
+    const finGeo = new THREE.ExtrudeGeometry(finShape, { depth: 0.26, bevelEnabled: true, bevelThickness: 0.08, bevelSize: 0.08, bevelSegments: 3, curveSegments: 10 });
+    finGeo.translate(0, 0, -0.13);
+    const fin = new THREE.Mesh(finGeo, red);
+    fin.castShadow = true;
+    tail.detail.add(fin);
+    addCollider(tail.tile, new CANNON.Vec3(-6.78, 0.75, 0), new CANNON.Vec3(1.05, 0.85, 0.22));
+
     for (const sz of [1, -1]) {
-      for (let k = 0; k < 6; k++) {
-        const w = new THREE.Mesh(winGeo, winMat);
-        w.position.set(-5.4 + k * 2.15, -1.5, sz * 3.45);
-        plane.add(w);
-      }
-    }
-
-    // ---- meow-air lettering on the hull sides ----
-    {
-      const tc = document.createElement("canvas");
-      tc.width = 512;
-      tc.height = 128;
-      const tg = tc.getContext("2d")!;
-      tg.font = "900 64px Nunito, sans-serif";
-      tg.textAlign = "center";
-      tg.textBaseline = "middle";
-      tg.fillStyle = "#e84a4a";
-      tg.fillText("★ MEOW AIR ★", 256, 66);
-      const ttex = new THREE.CanvasTexture(tc);
-      ttex.colorSpace = THREE.SRGBColorSpace;
-      for (const sz of [1, -1]) {
-        const decal = new THREE.Mesh(
-          new THREE.PlaneGeometry(5.4, 1.35),
-          new THREE.MeshBasicMaterial({ map: ttex, transparent: true, side: THREE.DoubleSide })
-        );
-        decal.position.set(-2.4, -1.5, sz * 3.5);
-        if (sz < 0) decal.rotation.y = Math.PI;
-        plane.add(decal);
-      }
-    }
-
-    // ---- nose + cockpit (in front of the play area, so it never blocks standing) ----
-    const noseBody = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 20), cream);
-    noseBody.scale.set(4.4, 1.7, 4.4);
-    noseBody.position.set(9.9, -1.6, 0);
-    noseBody.castShadow = true;
-    plane.add(noseBody);
-    // sloped nose deck with 3 windshield panes (dark glass)
-    const noseDeck = new THREE.Mesh(new THREE.BoxGeometry(3.2, 0.35, 4.6), cream);
-    noseDeck.position.set(9.2, -0.42, 0);
-    noseDeck.rotation.z = -0.16;
-    plane.add(noseDeck);
-    for (const sz of [-1.45, 0, 1.45]) {
-      const pane = new THREE.Mesh(new THREE.BoxGeometry(1.9, 0.16, 1.25), glass);
-      pane.position.set(9.25, -0.14, sz);
-      pane.rotation.z = -0.28;
-      plane.add(pane);
-    }
-    // slim cockpit windshield sitting on the nose (outside the play area)
-    const shield = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.62, 3.3), glass);
-    shield.position.set(8.3, 0.18, 0);
-    shield.rotation.z = 0.42;
-    plane.add(shield);
-    for (const sz of [-1.5, 1.5]) {
-      const post = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.1, 0.12), creamDark);
-      post.position.set(8.3, 0.22, sz);
-      post.rotation.z = 0.42;
-      plane.add(post);
-    }
-    // red spinner + nose prop
-    const spinnerCone = new THREE.Mesh(new THREE.ConeGeometry(1.25, 2.4, 22), red);
-    spinnerCone.rotation.z = -Math.PI / 2;
-    spinnerCone.position.set(13.9, -1.55, 0);
-    plane.add(spinnerCone);
-
-    // ---- tail: fin + stabilizers behind the play area ----
-    const tail = new THREE.Mesh(new THREE.BoxGeometry(3.4, 2.2, 5.4), cream);
-    tail.position.set(-9.7, -1.2, 0);
-    plane.add(tail);
-    const fin = new THREE.Mesh(new THREE.BoxGeometry(0.5, 3.4, 1.9), red);
-    fin.position.set(-12.1, 1.15, 0);
-    fin.rotation.z = 0.12;
-    plane.add(fin);
-    const finStripe = new THREE.Mesh(new THREE.BoxGeometry(0.54, 0.6, 1.94), mat(0xffffff, 0.5));
-    finStripe.position.set(-12.15, 1.5, 0);
-    finStripe.rotation.z = 0.12;
-    plane.add(finStripe);
-    for (const sz of [1, -1]) {
-      const stab = new THREE.Mesh(new THREE.BoxGeometry(2.6, 0.32, 4.6), cream);
-      stab.position.set(-10.0, -0.95, sz * 3.4);
-      plane.add(stab);
-    }
-
-    // ---- shoulder wings (clearly visible beyond the standable wing-top) ----
-    for (const sz of [1, -1]) {
-      const wing = new THREE.Mesh(new THREE.BoxGeometry(6.0, 0.4, 7.6), cream);
-      wing.position.set(0.8, -0.28, sz * 11.2);
-      wing.rotation.x = sz * 0.08;
-      wing.rotation.y = sz * 0.06;
-      wing.castShadow = true;
-      wing.receiveShadow = true;
-      plane.add(wing);
-      // red wingtip with rounded cap
-      const tip = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), red);
-      tip.scale.set(3.4, 0.35, 1.6);
-      tip.position.set(0.8, -0.22, sz * 15.15);
-      tip.castShadow = true;
-      plane.add(tip);
-      const nav = new THREE.Mesh(
-        new THREE.SphereGeometry(0.3, 10, 8),
-        new THREE.MeshBasicMaterial({ color: sz > 0 ? 0x00ff88 : 0xff3333 })
-      );
-      nav.position.set(0.8, 0.0, sz * 15.9);
+      const tip = anchor(sz > 0 ? "wingL-tip" : "wingR-tip");
+      // The curved wingtip itself carries the painted red band.
+      const nav = new THREE.Mesh(new THREE.SphereGeometry(0.16, 12, 8), new THREE.MeshBasicMaterial({ color: sz > 0 ? 0x43eab1 : 0xff5964 }));
+      nav.position.set(-0.60, -0.52, sz * 7.32);
       nav.userData.blink = true;
       nav.userData.phase = sz;
-      plane.add(nav);
-      // flap line so it reads as a wing, not a slab
-      const flap = new THREE.Mesh(new THREE.BoxGeometry(5.2, 0.06, 0.5), creamDark);
-      flap.position.set(0.75, -0.05, sz * 10.6);
-      plane.add(flap);
+      tip.detail.add(nav);
+      this.animated.push(nav);
+      tip.tile.body.addShape(new CANNON.Sphere(0.16), new CANNON.Vec3(-0.60 - tip.tile.baseX, -0.52 + THICK / 2, sz * 7.32 - tip.tile.baseZ));
+
+      // Compact nacelles are tucked into the solid wing, rather than floating
+      // beyond its new swept edge.
+      const wing = anchor(sz > 0 ? "wingL-mid" : "wingR-mid");
+      const nacelle = new THREE.Mesh(new THREE.SphereGeometry(1, 28, 18), steel);
+      nacelle.scale.set(0.85, 0.28, 0.38);
+      nacelle.position.set(0.55, -0.98, sz * 4.8);
+      wing.detail.add(nacelle);
     }
 
-    // ---- propellers: nose + two wing engines ----
-    const mkProp = (x: number, y: number, z: number, s: number) => {
-      const mount = new THREE.Group();
-      mount.position.set(x, y, z);
-      mount.rotation.z = -Math.PI / 2;
-      const spinner = new THREE.Group();
-      spinner.userData.spin = true;
-      spinner.userData.spinSpeed = 16;
-      const hub = new THREE.Mesh(new THREE.SphereGeometry(0.45, 14, 10), mat(0xffc93c, 0.4));
-      spinner.add(hub);
-      for (let b = 0; b < 3; b++) {
-        const blade = new THREE.Mesh(new THREE.BoxGeometry(0.35, 0.06, 2.6), darkMetal);
-        blade.position.z = 1.2;
-        const pivot = new THREE.Group();
-        pivot.rotation.y = (b / 3) * Math.PI * 2;
-        pivot.add(blade);
-        spinner.add(pivot);
+    // Portholes belong to the fuselage flank and disappear with that section.
+    const portholeMat = new THREE.MeshPhysicalMaterial({ color: 0x87cde5, roughness: 0.25, clearcoat: 0.8 });
+    for (const sz of [1, -1]) {
+      const flank = anchor(sz > 0 ? "fuseL" : "fuseR");
+      for (const x of [-1.4, 0, 1.4, 2.8]) {
+        const rim = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), creamDark);
+        rim.scale.set(0.27, 0.34, 0.09);
+        rim.position.set(x, -1.28, sz * 2.96);
+        flank.detail.add(rim);
+        const window = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), portholeMat);
+        window.scale.set(0.20, 0.26, 0.08);
+        window.position.set(x, -1.28, sz * 3.035);
+        flank.detail.add(window);
       }
-      mount.add(spinner);
-      const disc = new THREE.Mesh(
-        new THREE.CircleGeometry(2.55, 32),
-        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.12, side: THREE.DoubleSide, depthWrite: false })
-      );
-      disc.rotation.x = -Math.PI / 2;
-      mount.add(disc);
-      mount.scale.setScalar(s);
-      plane.add(mount);
-    };
-    mkProp(15.9, -1.55, 0, 1.2);
-    for (const sz of [1, -1]) {
-      const nac = new THREE.Mesh(new THREE.CylinderGeometry(0.95, 0.95, 4.4, 16), steel);
-      nac.rotation.z = Math.PI / 2;
-      nac.position.set(1.9, -0.9, sz * 11.0);
-      plane.add(nac);
-      const strut = new THREE.Mesh(new THREE.BoxGeometry(0.35, 1.2, 0.35), darkMetal);
-      strut.position.set(1.9, -1.1, sz * 11.0);
-      plane.add(strut);
-      mkProp(4.35, -0.9, sz * 11.0, 0.9);
     }
 
-    // ---- landing skids under the belly (depth cue) ----
-    for (const sz of [1, -1]) {
-      const skid = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.5, 3.2), darkMetal);
-      skid.position.set(-2.5, -4.3, sz * 3.2);
-      plane.add(skid);
-      const wheel = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 0.55, 16), mat(0x2b2f3a, 0.7));
-      wheel.rotation.x = Math.PI / 2;
-      wheel.position.set(-2.5, -4.75, sz * 3.2);
-      plane.add(wheel);
+    // Enlarge the airframe itself, not characters, props or sky. Every visual
+    // chunk and its compound collider share the same transform, including the
+    // canopy and fin; broken sections still rotate around their own bodies.
+    for (const chunk of this.chunks) {
+      const { tile, mesh } = chunk;
+      mesh.scale.setScalar(PLANE_SCALE);
+      tile.baseX *= PLANE_SCALE;
+      tile.baseZ *= PLANE_SCALE;
+      tile.hx *= PLANE_SCALE;
+      tile.hz *= PLANE_SCALE;
+      mesh.position.set(tile.baseX, 0, tile.baseZ);
+      const body = tile.body;
+      body.position.scale(PLANE_SCALE, body.position);
+      body.previousPosition.copy(body.position);
+      body.interpolatedPosition.copy(body.position);
+      for (let i = 0; i < body.shapes.length; i++) {
+        const shape = body.shapes[i];
+        body.shapeOffsets[i].scale(PLANE_SCALE, body.shapeOffsets[i]);
+        if (shape instanceof CANNON.Box) {
+          shape.halfExtents.scale(PLANE_SCALE, shape.halfExtents);
+          shape.updateConvexPolyhedronRepresentation();
+          shape.updateBoundingSphereRadius();
+        } else if (shape instanceof CANNON.Sphere) {
+          shape.radius *= PLANE_SCALE;
+          shape.updateBoundingSphereRadius();
+        } else {
+          throw new Error("Unsupported airplane collider shape");
+        }
+      }
+      body.updateBoundingRadius();
+      body.updateMassProperties();
+      body.aabbNeedsUpdate = true;
     }
 
-    // clouds
+    // Merge the puffs of each drifting cloud into a single draw call without
+    // changing their positions, shapes, materials, or parallax animation.
     const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1, emissive: 0xffffff, emissiveIntensity: 0.18 });
     const puff = new THREE.SphereGeometry(1, 14, 10);
-    for (let k = 0; k < 22; k++) {
-      const cloud = new THREE.Group();
-      const n = 3 + Math.floor(Math.random() * 4);
+    const makeCloud = (n: number, size: number, sizeRange: number, spacing: number) => {
+      const pieces: THREE.BufferGeometry[] = [];
       for (let p = 0; p < n; p++) {
-        const m = new THREE.Mesh(puff, cloudMat);
-        const s = 1.5 + Math.random() * 2.2;
-        m.scale.set(s, s * 0.7, s);
-        m.position.set(p * 2 - n, Math.random() * 0.8, Math.random() * 1.5);
-        cloud.add(m);
+        const radius = size + Math.random() * sizeRange;
+        const piece = puff.clone();
+        piece.scale(radius, radius * 0.7, radius);
+        piece.translate(p * spacing - n, Math.random() * 0.8, Math.random() * 1.5);
+        pieces.push(piece);
       }
+      const geometry = mergeGeometries(pieces);
+      for (const piece of pieces) piece.dispose();
+      return new THREE.Mesh(geometry, cloudMat);
+    };
+    for (let k = 0; k < 22; k++) {
+      const cloud = makeCloud(3 + Math.floor(Math.random() * 4), 1.5, 2.2, 2);
       const a = Math.random() * Math.PI * 2;
       const r = 30 + Math.random() * 34;
       cloud.position.set(Math.cos(a) * r, -16 - Math.random() * 16, Math.sin(a) * r);
       cloud.userData.drift = -(2.2 + Math.random() * 1.6);
       this.group.add(cloud);
+      this.animated.push(cloud);
     }
-    // backdrop clouds high behind the plane (parallax depth while flying)
+    // Backdrop clouds retain their slower parallax.
     for (let k = 0; k < 6; k++) {
-      const cloud = new THREE.Group();
-      const n = 4 + Math.floor(Math.random() * 3);
-      for (let p = 0; p < n; p++) {
-        const m = new THREE.Mesh(puff, cloudMat);
-        const s = 2.5 + Math.random() * 2.5;
-        m.scale.set(s, s * 0.7, s);
-        m.position.set(p * 2.5 - n, Math.random() * 0.8, Math.random() * 1.5);
-        cloud.add(m);
-      }
+      const cloud = makeCloud(4 + Math.floor(Math.random() * 3), 2.5, 2.5, 2.5);
       cloud.position.set(-40 + Math.random() * 80, 10 + Math.random() * 9, -34 - Math.random() * 22);
       cloud.userData.drift = -(0.7 + Math.random() * 0.6);
       this.group.add(cloud);
+      this.animated.push(cloud);
     }
+    puff.dispose();
     // wind streaks rushing past (plane flies toward +X, so everything streams -X)
     const streakMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.35, depthWrite: false });
     const streakGeo = new THREE.BoxGeometry(3.2, 0.07, 0.07);
@@ -389,6 +398,7 @@ export class Arena {
       );
       s.userData.streak = 14 + Math.random() * 10;
       this.group.add(s);
+      this.animated.push(s);
     }
 
     // baseball bats lying around (on solid wing panels)
@@ -399,7 +409,7 @@ export class Arena {
       const body = new CANNON.Body({ mass: 1.5, material: this.groundMat, linearDamping: 0.05, angularDamping: 0.25 });
       body.addShape(new CANNON.Box(new CANNON.Vec3(0.07, 0.72, 0.07)));
       body.addShape(new CANNON.Sphere(0.17), new CANNON.Vec3(0, 0.48, 0));
-      body.position.set(x, 0.2, z);
+      body.position.set(x * PLANE_SCALE, this.surfaceHeight(z * PLANE_SCALE) + 0.2, z * PLANE_SCALE);
       body.quaternion.setFromEuler(Math.PI / 2, a, 0);
       this.addBody(body);
       const mesh = makeBatMesh();
@@ -407,7 +417,7 @@ export class Arena {
       this.bats.push({ kind: "bat", body, mesh, holder: null, thrower: null, flyT: 0, hit: new Set(), centerOffset: 0.67, reach: 1.47, impactOffset: 1.2 });
     }
 
-    // cute pastel teflon frying pans lying around (100% like v2)
+    // Non-stick frying pans lying on the deck.
     for (const [x, z, a] of [
       [-2.4, -0.6, 0.4],
       [3.4, 0.8, -0.7],
@@ -419,7 +429,7 @@ export class Arena {
       body.addShape(new CANNON.Cylinder(0.49, 0.49, 0.13, 16), new CANNON.Vec3(0, 0.36, 0), face);
       // Contact sphere under the bowl gives Cannon reliable contact while keeping the pan flat on the surface.
       body.addShape(new CANNON.Sphere(0.14), new CANNON.Vec3(0, 0.36, -0.006));
-      body.position.set(x, 0.2, z);
+      body.position.set(x * PLANE_SCALE, this.surfaceHeight(z * PLANE_SCALE) + 0.2, z * PLANE_SCALE);
       body.quaternion.setFromEuler(-Math.PI / 2, a, 0);
       this.addBody(body);
       const mesh = makePanMesh();
@@ -438,7 +448,7 @@ export class Arena {
     for (const [x, z] of cratePos) {
       const b = new CANNON.Body({ mass: 2.5, material: this.groundMat });
       b.addShape(new CANNON.Box(new CANNON.Vec3(0.45, 0.45, 0.45)));
-      b.position.set(x, 0.5, z);
+      b.position.set(x * PLANE_SCALE, this.surfaceHeight(z * PLANE_SCALE) + 0.5, z * PLANE_SCALE);
       b.angularDamping = 0.3;
       this.addBody(b);
       const m = new THREE.Group();
@@ -453,7 +463,7 @@ export class Arena {
     {
       const b = new CANNON.Body({ mass: 0.5, material: this.groundMat, linearDamping: 0.15 });
       b.addShape(new CANNON.Sphere(0.55));
-      b.position.set(0.75, 1.5, -1.2);
+      b.position.set(0.75 * PLANE_SCALE, this.surfaceHeight(-1.2 * PLANE_SCALE) + 1.5, -1.2 * PLANE_SCALE);
       this.addBody(b);
       const tex = beachBallTexture();
       const m = new THREE.Mesh(new THREE.SphereGeometry(0.55, 24, 16), new THREE.MeshStandardMaterial({ map: tex, roughness: 0.5 }));
@@ -507,11 +517,18 @@ export class Arena {
 
   /** Is the given xz position over a solid airplane panel? */
   isSafe(x: number, z: number, margin = 0) {
+    const [left, right] = planeLimits(z / PLANE_SCALE).map(v => v * PLANE_SCALE);
+    if (x < left + margin || x > right - margin || Math.abs(z) > 7.7 * PLANE_SCALE - margin) return false;
     for (const t of this.tiles) {
       if (t.state !== "solid") continue;
       if (Math.abs(x - t.baseX) <= t.hx - margin && Math.abs(z - t.baseZ) <= t.hz - margin) return true;
     }
     return false;
+  }
+
+  /** Height of the scaled visible deck at a world-space z coordinate. */
+  surfaceHeight(z: number) {
+    return deckHeight(z / PLANE_SCALE) * PLANE_SCALE;
   }
 
   /** current solid half-extent along each axis (rough) */
@@ -531,11 +548,13 @@ export class Arena {
   randomSafePoint(margin = 0.8): { x: number; z: number } {
     const solid = this.tiles.filter((t) => t.state === "solid");
     const pool = solid.length ? solid : this.tiles;
-    const t = pool[Math.floor(Math.random() * pool.length)];
-    return {
-      x: t.baseX + (Math.random() * 2 - 1) * Math.max(0.1, t.hx - margin),
-      z: t.baseZ + (Math.random() * 2 - 1) * Math.max(0.1, t.hz - margin),
-    };
+    for (let i = 0; i < 80; i++) {
+      const t = pool[Math.floor(Math.random() * pool.length)];
+      const x = t.baseX + (Math.random() * 2 - 1) * Math.max(0.1, t.hx - margin);
+      const z = t.baseZ + (Math.random() * 2 - 1) * Math.max(0.1, t.hz - margin);
+      if (this.isSafe(x, z, margin)) return { x, z };
+    }
+    return { x: 0.75 * PLANE_SCALE, z: 0 };
   }
 
   update(dt: number, time: number) {
@@ -568,23 +587,13 @@ export class Arena {
         );
         ch.mesh.rotation.set(0, 0, 0);
         edgeMat.opacity = 0.5 + 0.5 * Math.sin(this.tFly * 18);
-        ch.active = true;
       } else if (st === "fall") {
-        if (!ch.active || ch.vel === 0) {
-          ch.active = true;
-          ch.vel = -2;
-          ch.angVel.set((Math.random() - 0.5) * 1.1, (Math.random() - 0.5) * 0.7, (Math.random() - 0.5) * 1.1);
-        }
         edgeMat.opacity = 1;
-        ch.vel = Math.max(ch.vel - 18 * dt, -25);
-        ch.mesh.position.y += ch.vel * dt;
-        ch.mesh.rotation.x += ch.angVel.x * dt;
-        ch.mesh.rotation.y += ch.angVel.y * dt;
-        ch.mesh.rotation.z += ch.angVel.z * dt;
-        if (ch.mesh.position.y < -45) {
-          ch.mesh.visible = false;
-          ch.active = false;
-        }
+        const body = ch.tile.body;
+        const top = body.pointToWorldFrame(new CANNON.Vec3(0, THICK * PLANE_SCALE / 2, 0));
+        ch.mesh.position.set(top.x, top.y, top.z);
+        ch.mesh.quaternion.set(body.quaternion.x, body.quaternion.y, body.quaternion.z, body.quaternion.w);
+        if (body.position.y < -45) ch.mesh.visible = false;
       } else if (st === "gone") {
         ch.mesh.visible = false;
       }
@@ -625,10 +634,9 @@ export class Arena {
       s.mesh.position.set(s.body.position.x, s.body.position.y, s.body.position.z);
       s.mesh.quaternion.set(s.body.quaternion.x, s.body.quaternion.y, s.body.quaternion.z, s.body.quaternion.w);
     }
-    // gentle flight bob on the plane only (deck physics stays fixed)
     this.tFly += dt;
     // (no airframe bobbing: the hull IS the floor, so feet must stay glued to it)
-    this.group.traverse((o) => {
+    for (const o of this.animated) {
       if (o.userData.spin) o.rotation.y += dt * (o.userData.spinSpeed ?? 9);
       else if (o.userData.blink) o.visible = Math.sin(this.tFly * 5 + (o.userData.phase || 0)) > -0.2;
       else if (o.userData.drift) {
@@ -643,20 +651,31 @@ export class Arena {
           o.position.z = -20 + Math.random() * 40;
         }
       }
-    });
+    }
     void time;
   }
 
   dispose() {
     for (const b of this.bodies) if (this.world.bodies.includes(b)) this.world.removeBody(b);
-    for (const ch of this.chunks) {
-      ch.mesh.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.isMesh || (m as unknown as THREE.LineSegments).isLineSegments) {
-          (m.geometry as THREE.BufferGeometry)?.dispose?.();
-        }
-      });
-    }
+    const geometries = new Set<THREE.BufferGeometry>();
+    const materials = new Set<THREE.Material>();
+    const textures = new Set<THREE.Texture>();
+    this.group.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh && !(o as THREE.LineSegments).isLineSegments) return;
+      if (mesh.geometry) geometries.add(mesh.geometry);
+      const list = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of list) {
+        if (!material) continue;
+        materials.add(material);
+        const map = (material as THREE.MeshStandardMaterial).map;
+        if (map) textures.add(map);
+      }
+    });
+    for (const geometry of geometries) geometry.dispose();
+    for (const material of materials) material.dispose();
+    for (const texture of textures) texture.dispose();
+    this.animated = [];
     this.chunks = [];
     this.scene.remove(this.group);
   }
@@ -672,55 +691,55 @@ function hullTopTexture() {
   const g = c.getContext("2d")!;
   const px = (x: number) => ((x + span / 2) / span) * S;
   const py = (z: number) => (1 - (z + span / 2) / span) * S;
-  // base cream hull
-  g.fillStyle = "#f3ede0";
+  // Smooth painted metal with a subtle highlight along the rounded cabin.
+  const paint = g.createLinearGradient(0, 0, 0, S);
+  paint.addColorStop(0, "#dce9e8");
+  paint.addColorStop(0.23, "#f5f2e4");
+  paint.addColorStop(0.5, "#fffaf0");
+  paint.addColorStop(0.77, "#f5f2e4");
+  paint.addColorStop(1, "#dce9e8");
+  g.fillStyle = paint;
   g.fillRect(0, 0, S, S);
-  // fuselage spine (brighter band down the middle, nose -> tail along X)
-  g.fillStyle = "#faf6ec";
-  g.fillRect(0, py(1.35), S, py(-1.35) - py(1.35));
-  // soft shading toward the wingtips
-  const vg = g.createLinearGradient(0, 0, 0, S);
-  vg.addColorStop(0, "rgba(120,105,85,0.18)");
-  vg.addColorStop(0.2, "rgba(120,105,85,0)");
-  vg.addColorStop(0.8, "rgba(120,105,85,0)");
-  vg.addColorStop(1, "rgba(120,105,85,0.18)");
-  g.fillStyle = vg;
-  g.fillRect(0, 0, S, S);
-  // red pinstripes framing the spine
-  g.strokeStyle = "#e0574f";
-  g.lineWidth = 9;
-  for (const z of [1.38, -1.38]) {
+  // Side-to-side shading reinforces the rounded fuselage crown.
+  const crown = g.createLinearGradient(0, py(3.2), 0, py(-3.2));
+  crown.addColorStop(0, "rgba(91,137,151,.17)");
+  crown.addColorStop(0.25, "rgba(255,255,255,0)");
+  crown.addColorStop(0.5, "rgba(255,255,255,.24)");
+  crown.addColorStop(0.75, "rgba(255,255,255,0)");
+  crown.addColorStop(1, "rgba(91,137,151,.17)");
+  g.fillStyle = crown;
+  g.fillRect(0, py(3.2), S, py(-3.2) - py(3.2));
+  // Two clean airline stripes follow the cabin, not a wooden-plank pattern.
+  for (const z of [1.55, -1.55]) {
+    g.strokeStyle = "#ca5150";
+    g.lineWidth = 10;
     g.beginPath();
     g.moveTo(0, py(z));
     g.lineTo(S, py(z));
     g.stroke();
-  }
-  // spanwise wing ribs + rivets (run WITH the wing = airplane, not a grid floor)
-  for (const z of [2.4, 3.3, 4.3, 5.4, 6.5, -2.4, -3.3, -4.3, -5.4, -6.5]) {
-    g.strokeStyle = "rgba(150,135,110,0.5)";
+    g.strokeStyle = "rgba(64,112,129,.48)";
     g.lineWidth = 3;
     g.beginPath();
-    g.moveTo(px(-7), py(z));
-    g.lineTo(px(7), py(z));
+    g.moveTo(0, py(z + 0.15));
+    g.lineTo(S, py(z + 0.15));
     g.stroke();
-    g.fillStyle = "rgba(130,115,95,0.55)";
-    for (let x = -6.8; x <= 6.8; x += 1.4) {
-      g.beginPath();
-      g.arc(px(x), py(z), 3.1, 0, Math.PI * 2);
-      g.fill();
-    }
   }
-  // aileron hatch lines on the wings
-  g.strokeStyle = "rgba(150,135,110,0.55)";
-  g.lineWidth = 4;
-  for (const z of [3.0, 4.9, 5.9, -3.0, -4.9, -5.9]) {
-    for (const x of [-1.5, 0.6]) {
-      g.beginPath();
-      g.moveTo(px(x), py(z));
-      g.lineTo(px(x + 2.2), py(z));
-      g.stroke();
-    }
+  // A handful of quiet wing panel seams keep the surface readable as metal.
+  g.strokeStyle = "rgba(91,126,135,.20)";
+  g.lineWidth = 3;
+  for (const z of [3.7, -3.7, 5.8, -5.8]) {
+    g.beginPath();
+    g.moveTo(px(-1.8), py(z));
+    g.lineTo(px(3.0), py(z));
+    g.stroke();
   }
+  // Cream cockpit spine gives the fuselage a broad, soft highlight.
+  const shine = g.createLinearGradient(0, py(1.1), 0, py(-1.1));
+  shine.addColorStop(0, "rgba(255,255,255,0)");
+  shine.addColorStop(0.5, "rgba(255,255,255,.28)");
+  shine.addColorStop(1, "rgba(255,255,255,0)");
+  g.fillStyle = shine;
+  g.fillRect(0, py(1.1), S, py(-1.1) - py(1.1));
   // red wingtip bands (fall first)
   g.fillStyle = "rgba(224,87,79,0.92)";
   g.fillRect(0, py(7.7), S, py(6.9) - py(7.7));
@@ -752,7 +771,7 @@ function hullTopTexture() {
   }
   // red chevrons on the wings
   g.strokeStyle = "rgba(224,87,79,0.75)";
-  g.lineWidth = 10;
+  g.lineWidth = 6;
   for (const z of [2.9, -2.9]) {
     g.beginPath();
     g.moveTo(px(-0.4), py(z - 0.55));
@@ -766,132 +785,123 @@ function hullTopTexture() {
   return t;
 }
 
-/** wedge footprint for one physics panel (local coords): nose tapers, wingtips taper */
-function buildPanelGeometry(t: Tile) {
-  const shape = new THREE.Shape();
-  const w = t.hx * 2;
-  const d = t.hz * 2;
-  const hw = w / 2;
-  const hd = d / 2;
-  const r = Math.min(0.5, Math.min(w, d) * 0.24);
-  shape.moveTo(-hw + r, -hd);
-  shape.lineTo(hw - r, -hd);
-  shape.quadraticCurveTo(hw, -hd, hw, -hd + r);
-  shape.lineTo(hw, hd - r);
-  shape.quadraticCurveTo(hw, hd, hw - r, hd);
-  shape.lineTo(-hw + r, hd);
-  shape.quadraticCurveTo(-hw, hd, -hw, hd - r);
-  shape.lineTo(-hw, -hd + r);
-  shape.quadraticCurveTo(-hw, -hd, -hw + r, -hd);
-  const geo = new THREE.ExtrudeGeometry(shape, {
-    depth: 0.42,
-    bevelEnabled: true,
-    bevelSize: 0.07,
-    bevelThickness: 0.06,
-    bevelSegments: 2,
-    curveSegments: 6,
-  });
-  geo.rotateX(-Math.PI / 2);
-  geo.computeBoundingBox();
-  geo.translate(0, 0.02 - geo.boundingBox!.max.y, 0);
+/** Cambered skin follows the same tapered footprint as its collision body. */
+function buildPanelGeometry(t: Tile, tiles: Tile[]) {
+  const nx = 20;
+  const nz = Math.max(12, Math.ceil(t.hz * 2 / 0.10));
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const add = (x: number, y: number, z: number) => {
+    positions.push(x, y, z);
+    return positions.length / 3 - 1;
+  };
+  const span = (z: number) => {
+    const [left, right] = panelSpan(t.baseX, t.hx, t.baseZ + z);
+    return [left - t.baseX, right - t.baseX] as const;
+  };
+  const zAt = (i: number) => -t.hz + i * 2 * t.hz / nz;
+  for (let iz = 0; iz <= nz; iz++) {
+    const z = zAt(iz), [left, right] = span(z);
+    for (let ix = 0; ix <= nx; ix++) add(left + (right - left) * ix / nx, deckHeight(t.baseZ + z) + 0.01, z);
+  }
+  for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) {
+    const i = iz * (nx + 1) + ix;
+    indices.push(i, i + nx + 1, i + 1, i + 1, i + nx + 1, i + nx + 2);
+  }
+  // Continuous connected rim: the previous segment-by-segment faces each had
+  // their own normal, producing visible vertical ribs on the nose and wings.
+  // Averaging the contour tangent and sharing vertices gives a smooth shell.
+  const side = (points: [number, number][]) => {
+    const profile = [[0.01, 0], [-0.04, 0.026], [-0.14, 0.052], [-0.28, 0.055], [-0.44, 0.035], [-0.58, 0.005], [-0.70, -0.04]];
+    const start = positions.length / 3;
+    for (let i = 0; i < points.length; i++) {
+      const [x, z] = points[i];
+      const before = points[Math.max(0, i - 1)], after = points[Math.min(points.length - 1, i + 1)];
+      const dx = after[0] - before[0], dz = after[1] - before[1];
+      const len = Math.hypot(dx, dz) || 1;
+      const ox = dz / len, oz = -dx / len;
+      const wx = t.baseX + x + ox * 0.04, wz = t.baseZ + z + oz * 0.04;
+      const [min, max] = planeLimits(wz);
+      const exposed = wx < min || wx > max || Math.abs(wz) > 7.7 || !tiles.some(other => other !== t && Math.abs(wx - other.baseX) < other.hx && Math.abs(wz - other.baseZ) < other.hz);
+      const h = deckHeight(t.baseZ + z);
+      const bottomY = hullBottom(t.baseX + x, t.baseZ + z);
+      const rimScale = Math.min(1, Math.max(0.05, (h - bottomY) / 0.70));
+      for (const [y, offset] of profile) add(x + ox * offset * rimScale * (exposed ? 1 : 0), h + (y < 0 ? y * rimScale : y), z + oz * offset * rimScale * (exposed ? 1 : 0));
+      add(x, bottomY, z);
+    }
+    const rows = profile.length + 1;
+    for (let i = 0; i < points.length - 1; i++) for (let r = 0; r < rows - 1; r++) {
+      const a = start + i * rows + r, b = a + rows, c = a + 1, d = b + 1;
+      indices.push(a, b, c, b, d, c);
+    }
+  };
+  const [startLeft, startRight] = span(-t.hz);
+  const [endLeft, endRight] = span(t.hz);
+  side(Array.from({ length: nx + 1 }, (_, i) => [startLeft + (startRight - startLeft) * i / nx, -t.hz]));
+  side(Array.from({ length: nz + 1 }, (_, i) => [span(zAt(i))[1], zAt(i)]));
+  side(Array.from({ length: nx + 1 }, (_, i) => [endRight - (endRight - endLeft) * i / nx, t.hz]));
+  side(Array.from({ length: nz + 1 }, (_, i) => [span(zAt(nz - i))[0], zAt(nz - i)]));
+  const bottom = positions.length / 3;
+  for (let iz = 0; iz <= nz; iz++) {
+    const z = zAt(iz), [left, right] = span(z);
+    for (let ix = 0; ix <= nx; ix++) {
+      const x = left + (right - left) * ix / nx;
+      add(x, hullBottom(t.baseX + x, t.baseZ + z), z);
+    }
+  }
+  for (let iz = 0; iz < nz; iz++) for (let ix = 0; ix < nx; ix++) {
+    const i = bottom + iz * (nx + 1) + ix;
+    indices.push(i, i + 1, i + nx + 1, i + 1, i + nx + 2, i + nx + 1);
+  }
+  const raw = new THREE.BufferGeometry();
+  raw.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  raw.setIndex(indices);
+  const geo = mergeVertices(raw, 1e-5);
+  raw.dispose();
+  geo.computeVertexNormals();
   return geo;
 }
 
-function roundedRectShapeWH(hw: number, hd: number, r: number) {
-  const s = new THREE.Shape();
-  const rr = Math.max(0.02, Math.min(r, hw * 0.99, hd * 0.99));
-  s.moveTo(-hw + rr, -hd);
-  s.lineTo(hw - rr, -hd);
-  s.quadraticCurveTo(hw, -hd, hw, -hd + rr);
-  s.lineTo(hw, hd - rr);
-  s.quadraticCurveTo(hw, hd, hw - rr, hd);
-  s.lineTo(-hw + rr, hd);
-  s.quadraticCurveTo(-hw, hd, -hw, hd - rr);
-  s.lineTo(-hw, -hd + rr);
-  s.quadraticCurveTo(-hw, -hd, -hw + rr, -hd);
-  return s;
-}
-
-/** chunky, toy-like cartoon baseball bat (1.5x), centred on its body origin, handle toward -Y */
-/** cute pastel teflon frying pan from v2, centred on its body origin, handle toward -Y (same grip frame as the bat) */
+/** Grey non-stick frying pan, with a plain cooking surface and no food. */
 function makePanMesh() {
   const g = new THREE.Group();
-  const mint = new THREE.MeshPhysicalMaterial({ color: 0x67d8c7, roughness: 0.4, metalness: 0.05, clearcoat: 0.75 });
-  const inside = new THREE.MeshStandardMaterial({ color: 0xfff5d8, roughness: 0.7 });
-  const pink = new THREE.MeshStandardMaterial({ color: 0xff86af, roughness: 0.58 });
-  const rimMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.42 });
-  const dark = new THREE.MeshBasicMaterial({ color: 0x483b56 });
-
-  // Lathe around local Y, then turn the bowl to face local +Z; the handle stays along Y.
+  const shell = new THREE.MeshStandardMaterial({ color: 0x626a72, roughness: 0.46, metalness: 0.32 });
+  const nonstick = new THREE.MeshStandardMaterial({ color: 0x343a40, roughness: 0.68, metalness: 0.1 });
+  const metal = new THREE.MeshStandardMaterial({ color: 0xa5acb2, roughness: 0.35, metalness: 0.7 });
+  const gripMat = new THREE.MeshStandardMaterial({ color: 0x292d32, roughness: 0.75 });
   const profile = [
     [0, -0.095], [0.27, -0.095], [0.38, -0.07], [0.45, -0.02],
     [0.45, 0.06], [0.415, 0.095], [0.37, 0.055], [0.33, 0.018], [0, 0.018],
   ].map(([r, depth]) => new THREE.Vector2(r, depth));
-
-  const pan = new THREE.Mesh(new THREE.LatheGeometry(profile, 32), mint);
+  const pan = new THREE.Mesh(new THREE.LatheGeometry(profile, 48), shell);
   pan.rotation.x = Math.PI / 2;
   pan.position.y = 0.34;
   pan.castShadow = pan.receiveShadow = true;
   g.add(pan);
-
-  const foodSurface = new THREE.Mesh(new THREE.CircleGeometry(0.35, 32), inside);
-  foodSurface.position.set(0, 0.34, 0.032);
-  g.add(foodSurface);
-
-  const lip = new THREE.Mesh(new THREE.TorusGeometry(0.425, 0.027, 8, 32), rimMat);
+  const surface = new THREE.Mesh(new THREE.CircleGeometry(0.35, 48), nonstick);
+  surface.position.set(0, 0.34, 0.032);
+  g.add(surface);
+  const lip = new THREE.Mesh(new THREE.TorusGeometry(0.425, 0.023, 10, 48), metal);
   lip.position.set(0, 0.34, 0.095);
   g.add(lip);
-
-  // A small fried egg gives the pan a recognizable, playful face.
-  const egg = new THREE.Mesh(new THREE.SphereGeometry(1, 20, 12), rimMat);
-  egg.scale.set(0.2, 0.16, 0.018);
-  egg.position.set(0, 0.35, 0.047);
-  g.add(egg);
-
-  const yolk = new THREE.Mesh(new THREE.SphereGeometry(0.1, 16, 10), new THREE.MeshStandardMaterial({ color: 0xffc93c, roughness: 0.45 }));
-  yolk.scale.z = 0.27;
-  yolk.position.set(0, 0.34, 0.066);
-  g.add(yolk);
-
-  for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.014, 8, 6), dark);
-    eye.position.set(side * 0.04, 0.355, 0.095);
-    g.add(eye);
-
-    const blush = new THREE.Mesh(new THREE.SphereGeometry(0.024, 10, 8), pink);
-    blush.scale.set(1, 0.58, 0.25);
-    blush.position.set(side * 0.16, 0.29, 0.067);
-    g.add(blush);
-  }
-
-  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.027, 0.0045, 5, 12, Math.PI), dark);
-  smile.rotation.z = Math.PI;
-  smile.position.set(0, 0.314, 0.096);
-  g.add(smile);
-
-  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.072, 0.63, 14), mint);
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(0.062, 0.072, 0.63, 16), shell);
   handle.position.y = -0.2;
   handle.castShadow = true;
   g.add(handle);
-
-  const grip = new THREE.Mesh(new THREE.CapsuleGeometry(0.076, 0.25, 6, 14), pink);
+  const grip = new THREE.Mesh(new THREE.CapsuleGeometry(0.076, 0.25, 6, 16), gripMat);
   grip.position.y = -0.31;
   grip.castShadow = true;
   g.add(grip);
-
-  const neck = new THREE.Mesh(new THREE.TorusGeometry(0.077, 0.013, 6, 16), rimMat);
+  const neck = new THREE.Mesh(new THREE.TorusGeometry(0.077, 0.013, 8, 20), metal);
   neck.rotation.x = Math.PI / 2;
   neck.position.y = -0.1;
   g.add(neck);
-
-  const hole = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.007, 6, 12), rimMat);
+  const hole = new THREE.Mesh(new THREE.TorusGeometry(0.028, 0.007, 6, 16), metal);
   hole.position.set(0, -0.5, 0.072);
   g.add(hole);
-
   g.scale.setScalar(1.22);
   return g;
 }
-
 
 function makeBatMesh() {
   const g = new THREE.Group();

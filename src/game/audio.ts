@@ -76,6 +76,7 @@ export const sfx = {
     if (now - lastHit < 0.03) return;
     lastHit = now;
     tone("sine", 220 + Math.random() * 60, 60, 0.18, 0.5 * strength);
+    tone("triangle", 430, 120, 0.07, 0.12 * strength);
     noise(0.08, 0.35 * strength, 1800);
   },
   bigHit() {
@@ -92,6 +93,11 @@ export const sfx = {
   },
   jump() {
     tone("sine", 280, 620, 0.14, 0.18);
+  },
+  seagull() {
+    // A short cartoony double squawk warns of the incoming bird.
+    tone("triangle", 950, 620, 0.13, 0.11);
+    tone("triangle", 1100, 700, 0.16, 0.09, 0.15);
   },
   whoosh() {
     noise(0.12, 0.12, 900);

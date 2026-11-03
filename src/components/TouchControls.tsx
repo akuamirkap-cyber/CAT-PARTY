@@ -109,6 +109,7 @@ export default function TouchControls() {
       touch.active = false;
       touch.mx = touch.mz = 0;
       touch.grab = false;
+      touch.grabPress = false;
       touch.punchHeld = false;
     };
   }, []);
@@ -120,11 +121,14 @@ export default function TouchControls() {
       </div>
       <div className="absolute bottom-6 right-4 h-56 w-56">
         <Btn
-          label="Grab"
+          label="Angkat"
           icon="✋"
           size={84}
           className="absolute bottom-0 right-0"
-          onDown={() => (touch.grab = true)}
+          onDown={() => {
+            touch.grab = true;
+            touch.grabPress = true;
+          }}
           onUp={() => (touch.grab = false)}
         />
         <Btn
@@ -139,8 +143,8 @@ export default function TouchControls() {
           onUp={() => (touch.punchHeld = false)}
         />
         <Btn label="Jump" icon="🦘" size={72} className="absolute bottom-0 right-28" onDown={() => (touch.jump = true)} />
-        <Btn label="HeadButt" icon="💥" size={58} className="absolute bottom-44 right-0" onDown={() => (touch.headbutt = true)} />
-        <Btn label="Angkat/Lempar" icon="🏋️" size={62} className="absolute bottom-40 right-24" onDown={() => (touch.lift = true)} />
+        <Btn label="Terjang" icon="💥" size={58} className="absolute bottom-44 right-0" onDown={() => (touch.headbutt = true)} />
+        <Btn label="Angkat/Rebut" icon="🏋️" size={62} className="absolute bottom-40 right-24" onDown={() => (touch.lift = true)} />
       </div>
     </div>
   );

@@ -35,8 +35,8 @@ interface Props {
   fighters: number;
   setSheet: (s: MobileSheet) => void;
   start: () => void;
-  mode: "brawl" | "bomb";
-  setMode: (m: "brawl" | "bomb") => void;
+  mode: "brawl" | "bomb" | "teams";
+  setMode: (m: "brawl" | "bomb" | "teams") => void;
   camMode: "stumble" | "gang";
   setCamMode: (m: "stumble" | "gang") => void;
   camZoom: number;
@@ -176,8 +176,8 @@ export default function MobileMenu(props: Props) {
           <span className="float-slow absolute -right-6 top-1 text-sm" style={{ ["--rot" as string]: "14deg", animationDelay: "-2s" }}>✦</span>
         </div>
         <div className="mx-auto mt-1 flex w-max items-center gap-1.5 rounded-full border-2 border-white bg-white/90 px-2.5 py-0.5 text-[8px] font-black uppercase tracking-widest text-[#7a4a06] shadow-[0_2px_0_rgba(122,74,6,.2)]">
-          <span className={`inline-block h-1.5 w-1.5 rounded-full ${mode === "bomb" ? "bg-red-500" : "bg-emerald-500"} dot-pulse`} />
-          {mode === "bomb" ? "Mode Bom · siap meledak!" : "Kucing meme saling gebuk!"}
+          <span className={`inline-block h-1.5 w-1.5 rounded-full ${mode === "bomb" ? "bg-red-500" : mode === "teams" ? "bg-sky-500" : "bg-emerald-500"} dot-pulse`} />
+          {mode === "bomb" ? "Mode Bom · siap meledak!" : mode === "teams" ? "Tim 5v5 · MERAH vs BIRU!" : "Kucing meme saling gebuk!"}
         </div>
       </div>
 
@@ -440,15 +440,15 @@ export default function MobileMenu(props: Props) {
             <button
               onClick={(e) => {
                 uiBtn(e);
-                setMode(mode === "brawl" ? "bomb" : "brawl");
+                setMode(mode === "brawl" ? "bomb" : mode === "bomb" ? "teams" : "brawl");
               }}
               title="Ketuk untuk ganti mode"
               className="press flex min-w-[92px] flex-col items-center justify-center gap-0.5 rounded-2xl border-[3px] border-white bg-gradient-to-b from-white to-[#dff3ff] px-1.5 py-1 shadow-[0_4px_0_rgba(60,90,140,.2)]"
             >
-              <span className={`grid h-7 w-7 place-items-center overflow-hidden rounded-lg shadow-[inset_0_-2px_0_rgba(0,0,0,.15)] [&_svg]:h-6 [&_svg]:w-6 ${mode === "bomb" ? "bg-gradient-to-b from-[#ff8f6b] to-[#e8343c]" : "bg-gradient-to-b from-[#ffe45c] to-[#ffb200]"}`}>
-                {mode === "bomb" ? <BombIcon /> : <IslandIcon />}
+              <span className={`grid h-7 w-7 place-items-center overflow-hidden rounded-lg shadow-[inset_0_-2px_0_rgba(0,0,0,.15)] [&_svg]:h-6 [&_svg]:w-6 ${mode === "bomb" ? "bg-gradient-to-b from-[#ff8f6b] to-[#e8343c]" : mode === "teams" ? "bg-gradient-to-b from-[#ff8a8a] to-[#7da8ff]" : "bg-gradient-to-b from-[#ffe45c] to-[#ffb200]"}`}>
+                {mode === "bomb" ? <BombIcon /> : mode === "teams" ? "🚩" : <IslandIcon />}
               </span>
-              <span className="text-[8px] font-black uppercase leading-none tracking-wide text-[#ff6f8f]">{mode === "bomb" ? "💣 Mode Bom" : "Brawl 👆"}</span>
+              <span className="text-[8px] font-black uppercase leading-none tracking-wide text-[#ff6f8f]">{mode === "bomb" ? "💣 Mode Bom" : mode === "teams" ? "🚩 Tim 5v5" : "Brawl 👆"}</span>
               <span className="flex items-center gap-1 text-[9px] font-black text-[#24364f]">
                 <PawIcon /> {fighters} <span className="text-slate-400">·</span> {bots}🤖
               </span>

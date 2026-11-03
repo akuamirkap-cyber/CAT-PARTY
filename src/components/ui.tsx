@@ -176,16 +176,16 @@ export function Sheet({
   footer?: React.ReactNode;
 }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/35 backdrop-blur-[3px] md:items-center md:p-6" onClick={onClose}>
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-[#432516]/50 backdrop-blur-[5px] md:items-center md:p-6" onClick={onClose}>
       <div
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className="sheet flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-[28px] border-4 border-white/80 bg-[#fff8ee] shadow-[0_-10px_40px_rgba(20,40,80,.3)] md:max-w-2xl md:rounded-[28px]"
+        className="sheet flex max-h-[88vh] w-full flex-col overflow-hidden rounded-t-[28px] border border-white/80 bg-[#fffaf0] shadow-[0_24px_70px_rgba(71,39,19,.25)] md:max-w-2xl md:rounded-[28px]"
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 border-b-4 border-[#ffe4bd] bg-gradient-to-b from-[#fffdf7] to-[#fff2da] px-4 py-3">
-          <span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-b from-[#ffe45c] to-[#ffc400] shadow-[inset_0_-3px_0_rgba(0,0,0,.15)] [&_svg]:h-5 [&_svg]:w-5">{icon}</span>
+        <div className="flex items-center gap-3 border-b border-[#f0e1d0] bg-[#fffaf0] px-4 py-3">
+          <span className="grid h-9 w-9 place-items-center rounded-xl bg-[#ffe4a3] [&_svg]:h-5 [&_svg]:w-5">{icon}</span>
           <div className="flex-1 text-lg font-black text-[#3a2b12]">{title}</div>
           <button
             type="button"
@@ -194,13 +194,13 @@ export function Sheet({
               uiBtn(e);
               onClose();
             }}
-            className="press grid h-9 w-9 place-items-center rounded-xl bg-[#ff6f8f] text-lg font-black text-white shadow-[0_4px_0_#c23c5e]"
+            className="press grid h-9 w-9 place-items-center rounded-xl bg-[#f4eadc] text-lg font-black text-[#79543b] hover:bg-[#ead8c4]"
           >
             ✕
           </button>
         </div>
         <div className="nice-scroll flex-1 overflow-y-auto p-4">{children}</div>
-        {footer && <div className="border-t-4 border-[#ffe4bd] bg-[#fff2da] p-3">{footer}</div>}
+        {footer && <div className="border-t border-[#f0e1d0] bg-[#fffaf0] p-3">{footer}</div>}
       </div>
     </div>
   );

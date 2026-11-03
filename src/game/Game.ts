@@ -2,13 +2,22 @@ import * as CANNON from "cannon-es";
 import * as THREE from "three";
 import { ACCESSORIES, ANIMALS, BOT_NAMES, animalById, type AccessoryId, type AnimalDef, type AnimalId } from "./animals";
 import { Arena } from "./Arena";
+import { Seagull } from "./Seagull";
 import { BLAST_R, BombManager, type Bomb } from "./Bombs";
 import { Character, GRAVITY, bodyOwner, type Bat, type CharacterHooks } from "./Character";
 import { attachInput, detachInput, emptyControl, endFrameInput, readControls, type ControlState } from "./input";
 import { sfx } from "./audio";
 import * as rig from "./rig";
 import { getTuning } from "./tuning";
+import { flagEmoji, pickFlags } from "./flags";
+import { qualityPixelRatio } from "./quality";
+import { randomFaceCombo, isDefaultFace, type EyeStyleId, type ExpressionId } from "./eyes";
+import { disposeCharacterDetails } from "./characterMesh";
+import { impactEffect, knockoutEffectColor } from "./impactEffects";
 const _ev = new THREE.Vector3();
+
+/** Face combos every cat gets — from the existing styles, never grumpy. */
+const randomFace = randomFaceCombo;
 
 export interface GameOptions {
   p1Animal: AnimalId;
@@ -16,16 +25,21 @@ export interface GameOptions {
   p2Animal: AnimalId;
   p1Acc: AccessoryId;
   p2Acc: AccessoryId;
+  p1Eyes?: EyeStyleId;
+  p1Expression?: ExpressionId;
   bots: number;
-  mode: "brawl" | "bomb";
+  mode: "brawl" | "bomb" | "teams";
   camMode: "stumble" | "gang";
   camZoom: number; // 0.7 dekat · 1 normal · 1.35 jauh
   onHud: (s: HudState) => void;
+  preparedRoster?: RosterEntry[];
 }
 
 export interface HudPlayer {
   id: number;
   animal: AnimalId;
+  eyeStyle: EyeStyleId;
+  expression: ExpressionId;
   name: string;
   emoji: string;
   color: string;
@@ -34,6 +48,9 @@ export interface HudPlayer {
   alive: boolean;
   slot: number;
   wins: number;
+  team: number;
+  lives: number;
+  flag: string;
 }
 
 export interface HudState {
@@ -46,18 +63,31 @@ export interface HudState {
   players: HudPlayer[];
   feed: { id: number; text: string }[];
   banner: string | null;
-  winner: { name: string; emoji: string; human: boolean; animal: AnimalId | null } | null;
+  winner: { name: string; emoji: string; human: boolean; animal: AnimalId | null; eyeStyle: EyeStyleId; expression: ExpressionId; team?: 0 | 1 } | null;
   meAlive: boolean;
-  mode: "brawl" | "bomb";
+  respawnIn: number | null;
+  mode: "brawl" | "bomb" | "teams";
+  teamMode: boolean;
+  teamWins: [number, number];
+  teamAlive: [number, number];
   bombs: number;
+  weaponContest: { owner: string; challenger: string; ownerPresses: number; challengerPresses: number; p1: boolean; p2: boolean } | null;
 }
 
-interface RosterEntry {
+export interface TeamWinner {
+  team: 0 | 1;
+}
+
+export interface RosterEntry {
   acc: AccessoryId;
+  eyeStyle: EyeStyleId;
+  expression: ExpressionId;
   def: AnimalDef;
   name: string;
   slot: 0 | 1 | 2;
   wins: number;
+  team: number;
+  flag: string;
 }
 
 interface Brain {
@@ -72,12 +102,84 @@ interface Brain {
   holdT: number;
   aggro: number;
   runFlag: boolean;
-  wander: number;
+  /** patrol waypoint (no enemies left): walk somewhere on purpose */
+  wanderX: number;
+  wanderZ: number;
+  wanderT: number;
+  /** circling at striking distance: flips now and then so it reads as footwork */
+  strafeT: number;
+  strafeDir: number;
+  /** rhythm of actual swings + reaction delay after locking on */
+  strikeT: number;
+  reactT: number;
+  /** give ground for a beat after eating a hit */
+  retreatT: number;
+  /** cooldown for the flying tackle approach */
+  pounceCd: number;
   aimT: number;
   fleeT: number;
   fleeX: number;
   fleeZ: number;
   hadBomb: boolean;
+}
+
+/** Build once before loading so the worker prepares the same cats used by the match. */
+export function createRoster(opts: Pick<GameOptions, "p1Animal" | "p2Animal" | "p1Acc" | "p2Acc" | "p1Eyes" | "p1Expression" | "twoPlayer" | "bots" | "mode">): RosterEntry[] {
+  const teams = opts.mode === "teams";
+  const counts = [0, 0];
+  const pickTeam = () => {
+    // P1 opens on red, P2 anchors blue; bots balance to a 5v5 split
+    const t = counts[0] <= counts[1] ? 0 : 1;
+    counts[t]++;
+    return t;
+  };
+  const flags = pickFlags(32).filter((f) => f !== "id"); // Indonesia is yours
+  let flagIdx = 0;
+  const nextFlag = () => flags[flagIdx++ % flags.length];
+  // Jambul is a costume character: its face IS the plush look, so only an
+  // explicit wardrobe pick may override it (random faces stay the recipe face).
+  const plushFace = { eyeStyle: "default" as EyeStyleId, expression: "default" as ExpressionId };
+  const youFace = isDefaultFace(opts.p1Eyes ?? "default", opts.p1Expression ?? "default") ? randomFace() : { eyeStyle: opts.p1Eyes!, expression: opts.p1Expression! };
+  const youDef = animalById(opts.p1Animal);
+  const youFinal = youDef.id === "jambul" && isDefaultFace(opts.p1Eyes ?? "default", opts.p1Expression ?? "default") ? plushFace : youFace;
+  const roster: RosterEntry[] = [{
+    def: youDef, name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc,
+    eyeStyle: youFinal.eyeStyle, expression: youFinal.expression, team: teams ? pickTeam() : -1,
+    flag: "id", // kamu selalu tampil dengan bendera Indonesia
+  }];
+  if (opts.twoPlayer) {
+    const p2Face = randomFace();
+    const p2Def = animalById(opts.p2Animal);
+    const p2Final = p2Def.id === "jambul" ? plushFace : p2Face;
+    roster.push({ def: p2Def, name: "P2", slot: 2, wins: 0, acc: opts.p2Acc, eyeStyle: p2Final.eyeStyle, expression: p2Final.expression, team: teams ? 1 : -1, flag: nextFlag() });
+    if (teams) counts[1]++;
+  }
+  const used = new Set<AnimalId>(roster.map(r => r.def.id));
+  const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
+  for (let i = 0; i < opts.bots; i++) {
+    let pool = ANIMALS.filter(a => !used.has(a.id));
+    if (!pool.length) pool = ANIMALS;
+    const def = pool[Math.floor(Math.random() * pool.length)];
+    used.add(def.id);
+    const acc: AccessoryId = Math.random() < 0.7 ? ACCESSORIES[1 + Math.floor(Math.random() * (ACCESSORIES.length - 1))].id : "none";
+    const face = def.id === "jambul" ? plushFace : randomFace();
+    roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc, eyeStyle: face.eyeStyle, expression: face.expression, team: teams ? pickTeam() : -1, flag: nextFlag() });
+  }
+  return roster;
+}
+
+/** lives each cat gets in a team match (Digimon-style stock) */
+export const TEAM_LIVES = 3;
+
+/** Remaining stocks per team: alive cats plus the lives they still hold. */
+export function teamStocks(chars: { removed: boolean; alive: boolean; team: number; lives: number; respawnT: number }[]): [number, number] {
+  const t: [number, number] = [0, 0];
+  for (const c of chars) {
+    if (c.removed || c.team < 0) continue;
+    const waiting = !c.alive && c.respawnT > 0;
+    if (c.alive || waiting) t[c.team] += Math.max(0, c.lives);
+  }
+  return t;
 }
 
 const wrapAngle = (a: number) => {
@@ -122,10 +224,12 @@ export class Game {
   arena: Arena | null = null;
   chars: Character[] = [];
   brains = new Map<Character, Brain>();
+  teamWins: [number, number] = [0, 0];
   roster: RosterEntry[] = [];
   phase: HudState["phase"] = "countdown";
   countdown = 3.5;
   timeLeft = ROUND_TIME;
+  private seagull: Seagull | null = null;
   round = 0;
   feed: { id: number; text: string; t: number }[] = [];
   feedId = 0;
@@ -151,11 +255,8 @@ export class Game {
   events = { sweeper: false, ring3: false, ring2: false, ring1: false };
   resizeObs: ResizeObserver;
   disposed = false;
-  hitStop = 0;
   tearT = 0;
   batOf = new Map<CANNON.Body, Bat>();
-  words: { sp: THREE.Sprite; life: number; vy: number; base: number }[] = [];
-  wordTex: Record<string, THREE.CanvasTexture> = {};
   bombs: BombManager | null = null;
   // adaptive quality (keeps FPS ultra smooth on weak devices)
   qLevel = 0;
@@ -193,7 +294,9 @@ export class Game {
     // sky
     this.scene.background = skyTexture();
     this.scene.fog = new THREE.Fog(0xb8e6ff, 50, 130);
-    this.scene.add(new THREE.HemisphereLight(0xeaf7ff, 0xffd9b0, 1.55));
+    // Warm-white sky fill instead of a blue one: the blue tint used to wash the
+    // orange fur out to beige in the arena.
+    this.scene.add(new THREE.HemisphereLight(0xfff3e4, 0xffd9b0, 1.5));
     const sun = new THREE.DirectionalLight(0xfff0d6, 2.5);
     sun.position.set(9, 20, 8);
     sun.castShadow = true;
@@ -212,7 +315,11 @@ export class Game {
 
     // physics
     this.world = new CANNON.World({ gravity: new CANNON.Vec3(0, -GRAVITY, 0) });
-    this.world.broadphase = new CANNON.SAPBroadphase(this.world);
+    const broadphase = new CANNON.SAPBroadphase(this.world);
+    // Long, thin plane sections have huge bounding spheres. AABB checks avoid
+    // sending distant characters and props through the expensive narrow phase.
+    broadphase.useBoundingBoxes = true;
+    this.world.broadphase = broadphase;
     (this.world.solver as CANNON.GSSolver).iterations = 10;
     this.world.allowSleep = false;
     this.world.defaultContactMaterial.friction = 0.3;
@@ -222,42 +329,11 @@ export class Game {
     this.world.addContactMaterial(new CANNON.ContactMaterial(cm, cm, { friction: 0.35, restitution: 0.15 }));
     this.world.addContactMaterial(new CANNON.ContactMaterial(this.groundMat, this.groundMat, { friction: 0.4, restitution: 0.2 }));
 
-    // roster
-    this.roster.push({ def: animalById(opts.p1Animal), name: "KAMU", slot: 1, wins: 0, acc: opts.p1Acc });
-    if (opts.twoPlayer) this.roster.push({ def: animalById(opts.p2Animal), name: "P2", slot: 2, wins: 0, acc: opts.p2Acc });
-    const used = new Set<AnimalId>(this.roster.map((r) => r.def.id));
-    const names = [...BOT_NAMES].sort(() => Math.random() - 0.5);
-    for (let i = 0; i < opts.bots; i++) {
-      let pool = ANIMALS.filter((a) => !used.has(a.id));
-      if (pool.length === 0) pool = ANIMALS;
-      const def = pool[Math.floor(Math.random() * pool.length)];
-      used.add(def.id);
-      const acc: AccessoryId = Math.random() < 0.7 ? ACCESSORIES[1 + Math.floor(Math.random() * (ACCESSORIES.length - 1))].id : "none";
-      this.roster.push({ def, name: names[i % names.length], slot: 0, wins: 0, acc });
-    }
+    // The roster can be prepared by the loading worker before WebGL starts.
+    this.roster.push(...(opts.preparedRoster ?? createRoster(opts)));
 
     // particles pool
     const pg = new THREE.SphereGeometry(1, 8, 6);
-    for (const [w, fill] of [
-      ["POW!", "#ffd23f"],
-      ["BAM!", "#ff7a59"],
-      ["BONK!", "#7cf0ff"],
-      ["WHAM!", "#ff8fd8"],
-      ["BUGH!", "#b6ff6b"],
-      ["WUSH!", "#ffffff"],
-      ["TONK!", "#ffe14d"],
-      ["KLONTANG!", "#ff9ecf"],
-      ["BOOM!", "#ff5a3c"],
-      ["KABOOM!", "#ffb43c"],
-      ["DUAR!", "#ff8fd8"],
-    ]) this.wordTex[w] = comicTexture(w, fill);
-    for (let i = 0; i < 10; i++) {
-      const sp = new THREE.Sprite(new THREE.SpriteMaterial({ transparent: true, depthTest: false }));
-      sp.visible = false;
-      sp.renderOrder = 20;
-      this.scene.add(sp);
-      this.words.push({ sp, life: 0, vy: 0, base: 1 });
-    }
     // single instanced draw call for ALL particles (was 110 meshes + 110 materials)
     this.pMesh = new THREE.InstancedMesh(
       pg,
@@ -265,6 +341,7 @@ export class Game {
       P_COUNT
     );
     this.pMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.pMesh.visible = false;
     this.pMesh.frustumCulled = false;
     _pm.makeScale(0, 0, 0);
     for (let i = 0; i < P_COUNT; i++) {
@@ -293,7 +370,7 @@ export class Game {
 
   /** auto quality: drop pixel ratio / shadow res when FPS sags, restore when smooth */
   private applyQuality() {
-    const pr = [this.qBasePR, Math.min(this.qBasePR, 1.5), 1.25, 1.0][this.qLevel];
+    const pr = qualityPixelRatio(this.qBasePR, this.qLevel);
     const sh = this.qLevel < 2 ? 1024 : 512;
     this.renderer.setPixelRatio(pr);
     const sm = this.sun?.shadow;
@@ -306,7 +383,9 @@ export class Game {
   }
 
   private autoQuality(rawDt: number) {
-    if (rawDt <= 0) return;
+    // Ignore tab suspension / very long startup stalls, but still react to
+    // genuinely slow frames on lower-end devices.
+    if (rawDt <= 0 || rawDt > 2 || document.hidden) return;
     const fps = 1 / rawDt;
     this.fpsEMA += (Math.min(fps, 120) - this.fpsEMA) * 0.04;
     this.qTimer += rawDt;
@@ -332,21 +411,20 @@ export class Game {
     onHit: (attacker, victim, point, dmg, kind) => {
       const big = kind !== "punch";
       const pan = kind === "pan";
-      this.burst(point.x, point.y, point.z, big ? 14 : 7, pan ? 0xffe9a6 : big ? 0xffe066 : 0xffffff, big ? 0.22 : 0.15, big ? 1.4 : 1);
+      const effect = impactEffect(kind);
+      this.burst(point.x, point.y, point.z, effect.count, effect.color, effect.size, effect.speed);
+      // A weapon blow gets a second, faster puff: one cloud reads as a tap, a
+      // burst reads as a hit. Keeps the white bat smoke, just punchier.
+      if (big) this.burst(point.x, point.y, point.z, 8, effect.color, effect.size * 0.62, 2.2, 0.55);
       if (pan) sfx.pan();
       else if (big) sfx.bigHit();
       else sfx.hit(Math.min(1.2, dmg / 15));
-      const word = kind === "pan" ? "PANG!" : kind === "bat" ? "BONK!" : kind === "throw" ? "WHAM!" : kind === "dropkick" ? "BAM!" : kind === "headbutt" ? "BUGH!" : Math.random() < 0.5 ? "POW!" : "BAM!";
-      const w2 = victim.accKind === "helmet" && Math.random() < 0.6 ? "TONK!" : word;
-      if (big || Math.random() < 0.6) this.comic(w2, point.x, point.y, point.z, big ? 1.25 : 0.85);
-      // hit-stop: freeze-frame that makes every hit feel crunchy
-      this.hitStop = Math.max(this.hitStop, kind === "bat" ? 0.11 : pan ? 0.075 : big ? 0.08 : 0.045);
-      if (attacker.isHuman || victim.isHuman) this.shake = Math.max(this.shake, kind === "bat" ? 0.5 : pan ? 0.26 : big ? 0.35 : 0.16);
+      if (attacker.isHuman || victim.isHuman) this.shake = Math.max(this.shake, kind === "bat" ? 0.64 : pan ? 0.42 : big ? 0.4 : 0.26);
     },
     onKO: (victim) => {
       this.pushFeed(`${victim.def.emoji} ${victim.name} pingsan! 💫`);
       const p = victim.head.position;
-      this.burst(p.x, p.y + 0.4, p.z, 8, 0xffd93d, 0.12);
+      this.burst(p.x, p.y + 0.4, p.z, 8, knockoutEffectColor(victim.lastHitKind), 0.12);
     },
     onLand: (c, k) => {
       const p = c.position;
@@ -363,17 +441,32 @@ export class Game {
     for (const c of this.chars) {
       c.removeFromWorld();
       this.scene.remove(c.root);
+      disposeCharacterDetails([c.root]);
+      c.nameTag.material.map?.dispose();
+      c.nameTag.material.dispose();
     }
+    this.seagull?.dispose();
+    this.seagull = null;
     this.arena?.dispose();
     this.bombs?.dispose();
     this.bombs = null;
     // clear lingering constraints/bodies
     for (const con of [...this.world.constraints]) this.world.removeConstraint(con);
     for (const b of [...this.world.bodies]) this.world.removeBody(b);
-    for (const l of Character.loose) l.mesh.removeFromParent();
+    for (const l of Character.loose) {
+      l.mesh.removeFromParent();
+      disposeCharacterDetails([l.mesh]);
+    }
     Character.loose = [];
+    Character.thrownProps = [];
 
     this.arena = new Arena(this.world, this.scene, this.groundMat);
+    this.seagull = new Seagull(this.scene, z => this.arena!.surfaceHeight(z), (_cat, x, y, z) => {
+      this.burst(x, y, z, 10, 0xf6f5ed, 0.13, 0.8, 0.8);
+      this.burst(x, y, z, 6, 0xffdd87, 0.1, 0.65, 0.8);
+      sfx.hit(0.8);
+      this.shake = Math.max(this.shake, 0.15);
+    }, () => sfx.seagull());
     if (this.opts.mode === "bomb") {
       this.bombs = new BombManager(this.world, this.scene, this.groundMat, {
         onExplode: (pos, thrower) => this.onBombExplode(pos, thrower),
@@ -392,13 +485,21 @@ export class Game {
       const fx = -3.0 + (i / Math.max(1, n - 1)) * 5.5 + (this.round % 2 ? 0.3 : -0.3);
       const fz = (i % 2 === 0 ? 1 : -1) * [0.5, 0.9, 1.9][i % 3];
       const pos = new THREE.Vector3(fx, 0.05, fz);
+      if (this.opts.mode === "teams" && r.team >= 0) {
+        // start on your own half: red on the left wing, blue on the right
+        const side = r.team === 0 ? -1 : 1;
+        const k = i % 5;
+        pos.set(side * (0.8 + (k % 2) * 1.5 + (k % 3) * 0.5), 0.05, -2.2 + k * 1.1 + (r.team === 0 ? -0.3 : 0.3));
+      }
       if (!this.arena!.isSafe(pos.x, pos.z, 0.3)) {
         const s = this.arena!.randomSafePoint(0.5);
         pos.set(s.x, 0.05, s.z);
       }
+      pos.y = this.arena!.surfaceHeight(pos.z) + 0.05;
       const yaw = Math.atan2(-pos.x, -pos.z);
-      const c = new Character(this.world, i, r.def, r.name, r.slot, this.hooks, pos, yaw, emptyControl(), r.acc);
+      const c = new Character(this.world, i, r.def, r.name, r.slot, this.hooks, pos, yaw, emptyControl(), r.acc, r.eyeStyle, r.expression, r.team, r.flag);
       c.wins = r.wins;
+      if (this.opts.mode === "teams") c.lives = TEAM_LIVES;
       this.scene.add(c.root);
       this.chars.push(c);
       if (r.slot === 0) {
@@ -413,7 +514,15 @@ export class Game {
           holdT: 0,
           aggro: 0.6 + Math.random() * 0.4,
           runFlag: false,
-          wander: Math.random() * 10,
+          wanderX: 0,
+          wanderZ: 0,
+          wanderT: 0,
+          strafeT: 0,
+          strafeDir: 1,
+          strikeT: 0.15 + Math.random() * 0.3,
+          reactT: 0,
+          retreatT: 0,
+          pounceCd: 0,
           batPref: Math.random() < 0.65,
           aimT: 0,
           fleeT: 0,
@@ -443,6 +552,16 @@ export class Game {
     if (this.phase === "roundEnd") this.startRound();
   }
 
+  /** Start the whole match over: round 1, scores cleared, same players/settings. */
+  restart() {
+    if (this.disposed) return;
+    this.round = 0;
+    this.teamWins = [0, 0];
+    for (const r of this.roster) r.wins = 0;
+    this.startRound();
+    this.setBanner("ULANG PERTANDINGAN!");
+  }
+
   pushFeed(text: string) {
     this.feed.push({ id: this.feedId++, text, t: 5 });
     if (this.feed.length > 5) this.feed.shift();
@@ -451,31 +570,14 @@ export class Game {
     this.banner = { text, t: 2.2 };
   }
 
-  comic(word: string, x: number, y: number, z: number, size = 1) {
-    const w = this.words.find((q) => q.life <= 0) ?? this.words[0];
-    const m = w.sp.material as THREE.SpriteMaterial;
-    m.map = this.wordTex[word];
-    m.rotation = (Math.random() - 0.5) * 0.5;
-    m.opacity = 1;
-    m.needsUpdate = true;
-    w.sp.position.set(x, y + 0.5, z);
-    w.life = 0.7;
-    w.vy = 1.4;
-    w.base = size;
-    w.sp.visible = true;
-  }
-
   /** Big cartoon explosion: flings EVERYONE in radius, credits the thrower. */
   onBombExplode(pos: THREE.Vector3, thrower: Character | null) {
-    // presentation: flash + fire + smoke + comic word
+    // presentation: flash + fire + smoke
     this.burst(pos.x, pos.y, pos.z, 26, 0xfff3c4, 0.5, 2.4, 1.2);
     this.burst(pos.x, pos.y, pos.z, 22, 0xff9a3c, 0.42, 1.9, 1.0);
     this.burst(pos.x, pos.y, pos.z, 16, 0xff4d3c, 0.36, 1.5, 1.4);
     this.burst(pos.x, pos.y + 0.6, pos.z, 10, 0x555566, 0.5, 0.7, 2.0);
-    const word = Math.random() < 0.45 ? "BOOM!" : Math.random() < 0.5 ? "KABOOM!" : "DUAR!";
-    this.comic(word, pos.x, pos.y, pos.z, 1.8);
     sfx.explode();
-    this.hitStop = Math.max(this.hitStop, 0.16);
     if (this.chars.some((c) => c.isHuman && c.alive)) this.shake = Math.max(this.shake, 0.9);
     // gameplay: radial fling, hurts + credits like a super-throw
     const R = BLAST_R + 0.8;
@@ -489,7 +591,7 @@ export class Game {
       const fall = 1 - d / R;
       const l = d || 1;
       const dir = new CANNON.Vec3(dx / l, 0, dz / l);
-      c.releaseAll(false); // blast knocks everything out of everyone's hands
+      c.releaseAll(false); // blast releases grabbed cats and props, not an equipped weapon
       const power = 7 + 13 * fall;
       c.torso.velocity.x += dir.x * power;
       c.torso.velocity.z += dir.z * power;
@@ -537,7 +639,9 @@ export class Game {
   }
 
   burst(x: number, y: number, z: number, count: number, color: number, size: number, speed = 1, up = 1) {
+    if (count <= 0) return;
     let spawned = 0;
+    _pc.setHex(color);
     for (let i = 0; i < this.particles.length; i++) {
       const p = this.particles[i];
       if (p.life > 0) continue;
@@ -545,10 +649,36 @@ export class Game {
       p.pos.set(x, y, z);
       p.vel.set((Math.random() - 0.5) * 6 * speed, (Math.random() * 4 + 1) * up, (Math.random() - 0.5) * 6 * speed);
       p.grow = size * (0.6 + Math.random() * 0.8);
-      this.pMesh?.setColorAt(i, _pc.setHex(color));
+      this.pMesh?.setColorAt(i, _pc);
       if (++spawned >= count) break;
     }
-    if (this.pMesh?.instanceColor) this.pMesh.instanceColor.needsUpdate = true;
+    if (spawned && this.pMesh) {
+      this.pMesh.visible = true;
+      if (this.pMesh.instanceColor) this.pMesh.instanceColor.needsUpdate = true;
+    }
+  }
+
+  /** Update only live particles; do not upload or draw the idle pool. */
+  private updateParticles(dt: number) {
+    if (!this.pMesh?.visible) return;
+    let changed = false, live = false;
+    for (let i = 0; i < this.particles.length; i++) {
+      const p = this.particles[i];
+      if (p.life <= 0) continue;
+      changed = true;
+      p.life -= dt;
+      p.vel.y -= 12 * dt;
+      p.pos.addScaledVector(p.vel, dt);
+      const k = Math.max(0, p.life / p.max);
+      _ps.setScalar(p.life <= 0 ? 0.0001 : p.grow * (0.15 + 0.85 * k * k));
+      _pm.compose(p.pos, _pq.identity(), _ps);
+      this.pMesh?.setMatrixAt(i, _pm);
+      if (p.life > 0) live = true;
+    }
+    if (this.pMesh) {
+      this.pMesh.visible = live;
+      if (changed) this.pMesh.instanceMatrix.needsUpdate = true;
+    }
   }
 
   // ---------------- BOT AI ----------------
@@ -556,7 +686,15 @@ export class Game {
     const s = emptyControl();
     const b = this.brains.get(c)!;
     const arena = this.arena!;
-    if (!c.alive || c.ko) return s;
+    if (!c.alive || c.down) return s;
+    if (c.weaponContest) {
+      c.contestBotDelay -= dt;
+      if (c.contestBotDelay <= 0) {
+        s.lift = true;
+        c.contestBotDelay = 0.43 + Math.random() * 0.22;
+      }
+      return s;
+    }
     const pos = c.position;
     const toCenter = () => {
       const l = Math.hypot(pos.x, pos.z) || 1;
@@ -568,7 +706,7 @@ export class Game {
       let best: Character | null = null;
       let bestScore = Infinity;
       for (const o of this.chars) {
-        if (o === c || !o.alive) continue;
+        if (o === c || !o.alive || (c.team >= 0 && o.team === c.team)) continue;
         const d = Math.hypot(o.position.x - pos.x, o.position.z - pos.z);
         const score = d + (o.ko ? -3 : 0) + Math.random() * 3 + (o.isHuman ? -0.8 : 0);
         if (score < bestScore) {
@@ -627,7 +765,7 @@ export class Game {
       let victim: Character | null = null;
       let bestScore = Infinity;
       for (const o of this.chars) {
-        if (o === c || !o.alive) continue;
+        if (o === c || !o.alive || (c.team >= 0 && o.team === c.team)) continue;
         const d = Math.hypot(o.position.x - pos.x, o.position.z - pos.z);
         let cluster = 0;
         for (const q of this.chars) {
@@ -859,37 +997,120 @@ export class Game {
 
     const t = b.target;
     if (t) {
-      // intercept: aim where the target is GOING, not where they are
       const rawDx = t.position.x - pos.x;
       const rawDz = t.position.z - pos.z;
       const dist = Math.hypot(rawDx, rawDz) || 0.001;
-      const lead = Math.min(0.45, Math.max(0, dist / 12));
-      const dx = rawDx + t.torso.velocity.x * lead;
-      const dz = rawDz + t.torso.velocity.z * lead;
-      const dl = Math.hypot(dx, dz) || 0.001;
-      s.mx = dx / dl;
-      s.mz = dz / dl;
-      s.run = b.runFlag && dist > 3;
-      if (dist < 1.7) {
-        // in melee range
-        s.mx *= 0.35;
-        s.mz *= 0.35;
-        if (t.ko && b.grabT <= 0 && Math.random() < 0.08) b.grabT = 1.0;
-        else if (b.grabT <= 0 && Math.random() < 0.006 * b.aggro) b.grabT = 0.8;
-        b.punchT -= dt;
-        if (b.punchT <= 0 && b.grabT <= 0 && !t.ko) {
-          s.punch = true;
-          b.punchT = 0.22 + Math.random() * (0.6 - b.aggro * 0.3);
-        }
-        if (Math.random() < 0.006 * b.aggro && c.attackCd <= 0) s.headbutt = true;
-      } else if (dist > 3 && dist < 5.5 && c.grounded && Math.random() < 0.004 * b.aggro && c.attackCd <= 0) {
-        s.jump = true;
-        b.dropkickT = 0.2;
+      // aim at where the target is GOING, not where it is right now; up
+      // close the lead matters more — a punch tracks a point 0.2 s ahead
+      const lead = dist < 2.2 ? 0.24 : Math.min(0.45, dist / 12);
+      const aimX = rawDx + t.torso.velocity.x * lead;
+      const aimZ = rawDz + t.torso.velocity.z * lead;
+      const aimL = Math.hypot(aimX, aimZ) || 1;
+      const nx = aimX / aimL;
+      const nz = aimZ / aimL;
+      // Footwork: hold the range and step around the target instead of
+      // shoving into it (that head-down push read as "just following").
+      b.strafeT -= dt;
+      if (b.strafeT <= 0) {
+        b.strafeDir = Math.random() < 0.5 ? -1 : 1;
+        b.strafeT = 1.0 + Math.random() * 1.5;
       }
+      const orbitX = nz * b.strafeDir;
+      const orbitZ = -nx * b.strafeDir;
+      b.strikeT -= dt;
+      b.reactT = Math.max(0, b.reactT - dt);
+      b.retreatT = Math.max(0, b.retreatT - dt);
+      b.pounceCd = Math.max(0, b.pounceCd - dt);
+
+      // Getting hit? Give ground for a moment instead of feeding the swing.
+      if (b.retreatT <= 0 && dist < 3.4 && (c.stagger > 0.12 || c.hurtT > 0.55)) b.retreatT = 0.4 + Math.random() * 0.45;
+
+      const face = wrapAngle(Math.atan2(rawDx, rawDz) - c.facing);
+      const facingTarget = Math.abs(face) < 1.1;
+      // swing only when the target is inside THIS weapon's reach
+      const reach = c.weapon ? 2.15 : 1.6;
+      const swingRange = c.weapon ? 1.95 : 1.22;
+      let mx = 0;
+      let mz = 0;
+      let run = false;
+      if (b.retreatT > 0) {
+        // back off while still watching the fight
+        mx = -nx + orbitX * 0.35;
+        mz = -nz + orbitZ * 0.35;
+        run = true;
+      } else if (dist > 3.1) {
+        mx = nx;
+        mz = nz;
+        run = true;
+      } else if (dist > reach * 0.92) {
+        // close in on a slight arc so the approach is not a straight line
+        mx = nx * 0.9 + orbitX * 0.18;
+        mz = nz * 0.9 + orbitZ * 0.18;
+        run = (b.runFlag && dist > 3) || dist > 3.2;
+      } else {
+        // in range: hold ground, lean in, swing on rhythm (a small weave keeps
+        // it alive without ever circling the foe)
+        mx = nx * 0.55 + orbitX * 0.14;
+        mz = nz * 0.55 + orbitZ * 0.14;
+      }
+
+      // Grab a knocked-out cat and haul it to the edge (unchanged intent).
+      if (t.ko && dist < 2.2 && b.grabT <= 0 && c.grounded && Math.random() < 0.5 * dt * 6) b.grabT = 1.0;
+      // A frisky bot sometimes starts a wrestling match on purpose.
+      else if (!t.ko && b.grabT <= 0 && dist < 1.5 && c.grounded && Math.random() < 0.006 * b.aggro) b.grabT = 0.8;
+
+      // Swing only when squared up AND inside the weapon's reach: random
+      // flailing from out of range or facing away is what made fights dumb.
+      const targetSliding = t.torso.velocity.x * t.torso.velocity.x + t.torso.velocity.z * t.torso.velocity.z > 9;
+      if (dist < swingRange && facingTarget && !targetSliding && b.strikeT <= 0 && b.grabT <= 0 && b.reactT <= 0 && !t.ko && !c.down) {
+        s.punch = true;
+        mx *= 0.3;
+        mz *= 0.3;
+        // better bots swing sooner and more often
+        b.strikeT = 0.24 + Math.random() * (0.55 - b.aggro * 0.3);
+      }
+
+      // Weapon contest: an unarmed cat can try to rip the weapon away.
+      if (dist < 1.7 && !c.weapon && t.weapon && !t.down && !c.holding && c.contestCooldown <= 0 && Math.random() < 0.004 * b.aggro) {
+        s.lift = true;
+        return s;
+      }
+
+      // Flying tackle when the target is running away and the gap is right.
+      const fleeing = (rawDx * t.torso.velocity.x + rawDz * t.torso.velocity.z) / dist > 1.6;
+      if (c.stagger <= 0.1 && b.pounceCd <= 0 && c.attackCd <= 0 && c.grounded && dist > 2.3 && dist < 4.6 &&
+          fleeing && Math.random() < 0.45 * b.aggro) {
+        s.jump = true;
+        b.dropkickT = 0.16;
+        b.pounceCd = 2.6 + Math.random() * 2.2;
+      }
+
+      s.mx = mx;
+      s.mz = mz;
+      s.run = run;
     } else {
-      b.wander += dt;
-      s.mx = Math.cos(b.wander * 0.5) * 0.5;
-      s.mz = Math.sin(b.wander * 0.5) * 0.5;
+      // Patrol: walk to a real waypoint on the plane instead of tracing circles.
+      b.wanderT -= dt;
+      const left = Math.hypot(b.wanderX - pos.x, b.wanderZ - pos.z);
+      if (b.wanderT <= 0 || left < 0.9) {
+        let px = b.wanderX;
+        let pz = b.wanderZ;
+        for (let i = 0; i < 6; i++) {
+          const p = arena.randomSafePoint(0.9);
+          px = p.x;
+          pz = p.z;
+          if (Math.hypot(p.x - pos.x, p.z - pos.z) > 2.4) break;
+        }
+        b.wanderX = px;
+        b.wanderZ = pz;
+        b.wanderT = 3.5 + Math.random() * 3;
+      }
+      const dx = b.wanderX - pos.x;
+      const dz = b.wanderZ - pos.z;
+      const l = Math.hypot(dx, dz) || 1;
+      s.mx = dx / l;
+      s.mz = dz / l;
+      s.run = l > 3.5;
     }
 
     if (b.dropkickT > 0) {
@@ -914,6 +1135,26 @@ export class Game {
           s.mz += (dz / d) * push;
         }
       }
+      const l = Math.hypot(s.mx, s.mz);
+      if (l > 1) {
+        s.mx /= l;
+        s.mz /= l;
+      }
+    }
+
+    // Personal space: cats should not stand inside each other.
+    for (const o of this.chars) {
+      if (o === c || !o.alive) continue;
+      const dx = pos.x - o.position.x;
+      const dz = pos.z - o.position.z;
+      const d2 = dx * dx + dz * dz;
+      if (d2 > 0.36 || d2 < 1e-6) continue;
+      const d = Math.sqrt(d2);
+      const push = (0.6 - d) * 2.4;
+      s.mx += (dx / d) * push;
+      s.mz += (dz / d) * push;
+    }
+    {
       const l = Math.hypot(s.mx, s.mz);
       if (l > 1) {
         s.mx /= l;
@@ -1025,7 +1266,7 @@ export class Game {
       for (const h of [c.holds.armL, c.holds.armR])
         if (h?.owner) {
           h.owner.heldBy++;
-          if (c.lifting && h.carry && !h.owner.ko) h.owner.carriedBy = c;
+          if (c.lifting && h.carry) h.owner.carriedBy = c;
         }
     for (const c of this.chars) c.updateCollisionMask();
     // thrown props cool down
@@ -1050,10 +1291,11 @@ export class Game {
     for (const c of this.chars) if (!c.removed) c.frameActions(dt);
 
     // physics
-    if (this.hitStop > 0) this.hitStop -= dt;
-    this.acc += this.hitStop > 0 ? dt * 0.06 : dt;
+    // Hits use particles, sound and camera shake, not a physics freeze.
+    this.acc += dt;
     let steps = 0;
     while (this.acc >= H && steps < 6) {
+      this.seagull?.update(H, this.chars, this.phase === "playing", this.camYaw);
       for (const c of this.chars) c.physicsStep(H);
       this.world.step(H);
       for (const con of this.world.contacts) {
@@ -1068,9 +1310,9 @@ export class Game {
             const v = bat.body.velocity;
             const l = Math.hypot(v.x, v.z) || 1;
             const pan = bat.kind === "pan";
-            victim.receiveHit(bat.thrower, pan ? 20 : 32, _hitDir.set(v.x / l, 0, v.z / l), pan ? 5 : 8, vb);
+            victim.receiveHit(bat.thrower, pan ? 20 : 32, _hitDir.set(v.x / l, 0, v.z / l), pan ? 5 : 8, vb, undefined, pan ? "pan" : "bat");
             victim.capKnockback(6, 3.2);
-            this.hooks.onHit(bat.thrower, victim, _hitPos.copy(vb.position), pan ? 20 : 32, pan ? "pan" : "throw");
+            this.hooks.onHit(bat.thrower, victim, _hitPos.copy(vb.position), pan ? 20 : 32, pan ? "pan" : "bat");
           }
         }
         if (a && b && a.char !== b.char) {
@@ -1143,31 +1385,74 @@ export class Game {
         }
         const killer = c.lastHitBy && c.time - c.lastHitAt < 7 && c.lastHitBy !== c ? c.lastHitBy : null;
         const byBomb = this.opts.mode === "bomb" && c.lastHitKind === "bomb";
+        const tag = (x: Character) => (this.opts.mode === "teams" ? `${x.team === 0 ? "🟥" : "🟦"} ` : "");
+        const fl = (x: Character) => flagEmoji(x.flag);
         this.pushFeed(
           killer
             ? byBomb
-              ? `💥 ${killer.name} meledakkan ${c.def.emoji} ${c.name} keluar!`
-              : `${killer.def.emoji} ${killer.name} melempar ${c.def.emoji} ${c.name} keluar!`
-            : `${c.def.emoji} ${c.name} jatuh sendiri 🤦`
+              ? `💥 ${tag(killer)}${killer.name}${fl(killer)} meledakkan ${tag(c)}${c.def.emoji} ${c.name}${fl(c)} keluar!`
+              : `${tag(killer)}${killer.def.emoji} ${killer.name}${fl(killer)} melempar ${tag(c)}${c.def.emoji} ${c.name}${fl(c)} keluar!`
+            : `${tag(c)}${c.def.emoji} ${c.name}${fl(c)} jatuh sendiri 🤦`
         );
-        if (c.isHuman) this.setBanner(c.humanSlot === 1 ? "KAMU TERSINGKIR!" : "P2 TERSINGKIR!");
+        const outOfLives = this.opts.mode !== "teams" || c.team < 0 || c.lives <= 0;
+        if (!outOfLives) {
+          c.lives--;
+          if (c.lives > 0) {
+            c.parkForRespawn();
+            c.respawnT = 2.8;
+            this.pushFeed(`↩️ ${tag(c)}${c.name}${flagEmoji(c.flag)} balik lagi! (sisa ${c.lives} nyawa)`);
+            if (c.isHuman) this.setBanner(`KAMU GUGUR! SISA ${c.lives} NYAWA`);
+          } else {
+            this.pushFeed(`☠️ ${tag(c)}${c.name}${flagEmoji(c.flag)} habis nyawanya!`);
+            if (c.isHuman) this.setBanner(c.humanSlot === 1 ? "KAMU TERSINGKIR!" : "P2 TERSINGKIR!");
+          }
+        } else if (c.isHuman) this.setBanner(c.humanSlot === 1 ? "KAMU TERSINGKIR!" : "P2 TERSINGKIR!");
         sfx.fall();
       }
       if (y < -28) c.removeFromWorld();
     }
 
+    // team-mode respawns
+    if (this.phase === "playing" && this.opts.mode === "teams") {
+      for (const c of this.chars) {
+        if (c.removed || c.alive || c.respawnT <= 0) continue;
+        c.respawnT -= dt;
+        if (c.respawnT <= 0) {
+          const spot = this.respawnSpot(c.team);
+          const y = this.arena!.surfaceHeight(spot.z) + 0.05;
+          c.respawnAt(spot.x, y, spot.z, Math.atan2(-spot.x, -spot.z));
+          if (c.isHuman) this.setBanner("KAMU BALIK! 💪");
+          sfx.grab();
+        }
+      }
+    }
+
     // round end
     if (this.phase === "playing") {
       const alive = this.chars.filter((c) => c.alive);
-      if (alive.length <= 1) {
+      if (this.opts.mode === "teams") {
+        // team match: the round ends when a team runs out of lives entirely
+        const stocks = teamStocks(this.chars);
+        if (stocks[0] === 0 || stocks[1] === 0) {
+          this.phase = "roundEnd";
+          const win: 0 | 1 | null = stocks[0] > 0 ? 0 : stocks[1] > 0 ? 1 : null;
+          if (win !== null) this.teamWins[win]++;
+          const humanWin = win !== null && this.chars.some((c) => c.isHuman && c.team === win);
+          this.winner = win === null
+            ? { name: "Seri", emoji: "🤝", human: false, animal: null, eyeStyle: "default", expression: "default" }
+            : { name: win === 0 ? "TIM MERAH" : "TIM BIRU", emoji: win === 0 ? "🟥" : "🟦", human: humanWin, animal: null, eyeStyle: "default", expression: "default", team: win };
+          sfx.win();
+          this.emitHud();
+        }
+      } else if (alive.length <= 1) {
         this.phase = "roundEnd";
         const w = alive[0];
         if (w) {
           const r = this.roster[w.index];
           r.wins++;
           w.wins = r.wins;
-          this.winner = { name: w.name, emoji: w.def.emoji, human: w.isHuman, animal: w.def.id };
-        } else this.winner = { name: "Seri", emoji: "🤝", human: false, animal: null };
+          this.winner = { name: w.name, emoji: w.def.emoji, human: w.isHuman, animal: w.def.id, eyeStyle: this.roster[w.index].eyeStyle, expression: this.roster[w.index].expression };
+        } else this.winner = { name: "Seri", emoji: "🤝", human: false, animal: null, eyeStyle: "default", expression: "default" };
         sfx.win();
         this.emitHud();
       }
@@ -1175,31 +1460,8 @@ export class Game {
 
     // visuals
     for (const c of this.chars) if (!c.removed) c.syncVisual();
-    // particles fade by shrinking (per-instance alpha isn't a thing — 1 draw call total)
-    for (let i = 0; i < this.particles.length; i++) {
-      const p = this.particles[i];
-      if (p.life <= 0) continue;
-      p.life -= dt;
-      p.vel.y -= 12 * dt;
-      p.pos.addScaledVector(p.vel, dt);
-      const k = Math.max(0, p.life / p.max);
-      _ps.setScalar(p.life <= 0 ? 0.0001 : p.grow * (0.15 + 0.85 * k * k));
-      _pm.compose(p.pos, _pq.identity(), _ps);
-      this.pMesh?.setMatrixAt(i, _pm);
-    }
-    if (this.pMesh) this.pMesh.instanceMatrix.needsUpdate = true;
+    this.updateParticles(dt);
 
-    for (const w of this.words) {
-      if (w.life <= 0) continue;
-      w.life -= dt;
-      const k = 1 - w.life / 0.7;
-      const pop = k < 0.15 ? (k / 0.15) * 1.25 : 1.25 - Math.min(0.25, (k - 0.15) * 0.6);
-      w.sp.scale.set(1.6 * w.base * pop, 0.8 * w.base * pop, 1);
-      w.sp.position.y += w.vy * dt;
-      w.vy *= 0.9;
-      (w.sp.material as THREE.SpriteMaterial).opacity = Math.min(1, w.life / 0.25);
-      if (w.life <= 0) w.sp.visible = false;
-    }
     for (const l of Character.loose) {
       l.mesh.position.set(l.body.position.x, l.body.position.y, l.body.position.z);
       l.mesh.quaternion.set(l.body.quaternion.x, l.body.quaternion.y, l.body.quaternion.z, l.body.quaternion.w);
@@ -1292,8 +1554,20 @@ export class Game {
     this.camera.lookAt(this.camLook);
   }
 
+  /** A free spot on the respawning cat's own half of the plane. */
+  private respawnSpot(team: number): { x: number; z: number } {
+    const side = team === 0 ? -1 : 1;
+    for (let i = 0; i < 24; i++) {
+      const p = this.arena!.randomSafePoint(0.45);
+      if (p.x * side < 0.25) p.x = side * (0.45 + Math.random() * 1.4);
+      if (this.arena!.isSafe(p.x, p.z, 0.4)) return p;
+    }
+    return { x: side * 0.9, z: 0 };
+  }
+
   emitHud() {
     const me = this.chars.find((c) => c.humanSlot === 1);
+    const contest = this.chars.find(c => c.isHuman && c.weaponContest)?.weaponContest;
     this.opts.onHud({
       phase: this.phase,
       countdown: Math.max(0, Math.ceil(this.countdown)),
@@ -1304,6 +1578,8 @@ export class Game {
       players: this.chars.map((c) => ({
         id: c.index,
         animal: c.def.id,
+        eyeStyle: this.roster[c.index].eyeStyle,
+        expression: this.roster[c.index].expression,
         name: c.name,
         emoji: c.def.emoji,
         color: c.def.ui,
@@ -1312,13 +1588,29 @@ export class Game {
         alive: c.alive,
         slot: c.humanSlot,
         wins: c.wins,
+        team: c.team,
+        lives: c.lives,
+        flag: c.flag,
       })),
       feed: this.feed.map((f) => ({ id: f.id, text: f.text })),
       banner: this.banner?.text ?? null,
       winner: this.winner,
       meAlive: !!me?.alive,
+      respawnIn: me && !me.alive && me.respawnT > 0 ? me.respawnT : null,
       mode: this.opts.mode,
+      teamMode: this.opts.mode === "teams",
+      teamWins: [this.teamWins[0], this.teamWins[1]],
+      teamAlive: [
+        this.chars.filter((c) => c.alive && c.team === 0).length,
+        this.chars.filter((c) => c.alive && c.team === 1).length,
+      ],
       bombs: this.bombs?.live.length ?? 0,
+      weaponContest: contest ? {
+        owner: contest.owner.name, challenger: contest.challenger.name,
+        ownerPresses: contest.ownerPresses, challengerPresses: contest.challengerPresses,
+        p1: contest.owner.humanSlot === 1 || contest.challenger.humanSlot === 1,
+        p2: contest.owner.humanSlot === 2 || contest.challenger.humanSlot === 2,
+      } : null,
     });
   }
 
@@ -1327,6 +1619,24 @@ export class Game {
     cancelAnimationFrame(this.raf);
     this.resizeObs.disconnect();
     detachInput();
+    for (const c of this.chars) {
+      c.removeFromWorld();
+      disposeCharacterDetails([c.root]);
+      c.nameTag.material.map?.dispose();
+      c.nameTag.material.dispose();
+    }
+    for (const l of Character.loose) disposeCharacterDetails([l.mesh]);
+    this.chars = [];
+    Character.all = [];
+    Character.loose = [];
+    Character.thrownProps = [];
+    this.seagull?.dispose();
+    this.seagull = null;
+    this.arena?.dispose();
+    this.bombs?.dispose();
+    this.pMesh?.geometry.dispose();
+    (this.pMesh?.material as THREE.Material | undefined)?.dispose();
+    if (this.scene.background instanceof THREE.Texture) this.scene.background.dispose();
     this.renderer.dispose();
     this.renderer.domElement.remove();
   }
@@ -1344,38 +1654,6 @@ function skyTexture() {
   grd.addColorStop(1, "#fff1dc");
   g.fillStyle = grd;
   g.fillRect(0, 0, 4, 256);
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  return t;
-}
-
-function comicTexture(word: string, fill: string) {
-  const c = document.createElement("canvas");
-  c.width = 256;
-  c.height = 128;
-  const g = c.getContext("2d")!;
-  // spiky burst
-  g.translate(128, 64);
-  g.beginPath();
-  for (let i = 0; i < 24; i++) {
-    const a = (i / 24) * Math.PI * 2;
-    const r = i % 2 ? 46 : 62;
-    g.lineTo(Math.cos(a) * r * 1.85, Math.sin(a) * r);
-  }
-  g.closePath();
-  g.fillStyle = "#ffffff";
-  g.fill();
-  g.lineWidth = 5;
-  g.strokeStyle = "#2b1d3a";
-  g.stroke();
-  g.font = "900 54px 'Nunito', system-ui, sans-serif";
-  g.textAlign = "center";
-  g.textBaseline = "middle";
-  g.lineWidth = 10;
-  g.strokeStyle = "#2b1d3a";
-  g.strokeText(word, 0, 4);
-  g.fillStyle = fill;
-  g.fillText(word, 0, 4);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
   return t;
